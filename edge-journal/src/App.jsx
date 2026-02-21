@@ -28,6 +28,8 @@ const GlobalStyles = () => (
     .hover-row:hover { background: var(--surface2) !important; }
     .nav-item { transition: all 0.15s; }
     .nav-item:hover { color: var(--text) !important; background: var(--surface2) !important; }
+    .mistake-tag { transition: all 0.15s; }
+    .mistake-tag:hover { opacity: 0.85; }
     @keyframes fadeUp {
       from { opacity: 0; transform: translateY(10px); }
       to   { opacity: 1; transform: translateY(0); }
@@ -60,17 +62,53 @@ const DEMO_TRADES = [
 ];
 
 const DEMO_PLAYBOOKS = [
-  { id:"pb1", name:"ORB",           description:"Opening Range Breakout — first 5-min candle break with volume", color:"#3b9eff" },
-  { id:"pb2", name:"VWAP Reclaim",  description:"Price drops under VWAP, reclaims it with momentum",            color:"#00e5a0" },
-  { id:"pb3", name:"Break & Retest",description:"Key level breaks, pulls back, holds as new S/R",               color:"#f5c842" },
+  { id:"pb1", name:"ORB",            description:"Opening Range Breakout — first 5-min candle break with volume", color:"#3b9eff" },
+  { id:"pb2", name:"VWAP Reclaim",   description:"Price drops under VWAP, reclaims it with momentum",            color:"#00e5a0" },
+  { id:"pb3", name:"Break & Retest", description:"Key level breaks, pulls back, holds as new S/R",               color:"#f5c842" },
+];
+
+// ─── MISTAKE TAGS ─────────────────────────────────────────────────────────────
+const MISTAKE_OPTIONS = [
+  { id:"chased",    label:"Chased Entry",      color:"#f87171" },
+  { id:"movedstop", label:"Moved Stop",        color:"#fb923c" },
+  { id:"earlyexit", label:"Exited Too Early",  color:"#fbbf24" },
+  { id:"lateexit",  label:"Exited Too Late",   color:"#a78bfa" },
+  { id:"oversize",  label:"Oversized",         color:"#f43f5e" },
+  { id:"revenge",   label:"Revenge Trade",     color:"#ef4444" },
+  { id:"noplan",    label:"No Plan",           color:"#f97316" },
+  { id:"fomo",      label:"FOMO",              color:"#ec4899" },
+  { id:"overtraded",label:"Overtraded",        color:"#e879f9" },
+  { id:"ignored",   label:"Ignored Signal",    color:"#94a3b8" },
 ];
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
-const fmt     = (n, d=2)  => n == null ? "—" : (n >= 0 ? "+" : "") + "$" + Math.abs(n).toFixed(d);
-const fmtAbs  = (n, d=0)  => n == null ? "—" : "$" + Math.abs(n).toFixed(d);
-const pct     = (n)       => (n * 100).toFixed(1) + "%";
+const fmt        = (n, d=2)  => n == null ? "—" : (n >= 0 ? "+" : "") + "$" + Math.abs(n).toFixed(d);
+const fmtAbs     = (n, d=0)  => n == null ? "—" : "$" + Math.abs(n).toFixed(d);
+const pct        = (n)       => (n * 100).toFixed(1) + "%";
 const gradeColor = g => ({ A:"#00e5a0", B:"#3b9eff", C:"#f5c842", D:"#ff9a3b", F:"#ff4d6a" }[g] || "#5a7a9a");
 const sideColor  = s => s === "LONG" ? "var(--green)" : "var(--red)";
+
+// R-multiple: P&L / initial risk (1R in dollars). Returns null if no risk set.
+const calcR = (pnl, risk1R) => {
+  const r = parseFloat(risk1R);
+  if (!r || r <= 0) return null;
+  return pnl / r;
+};
+const fmtR = (r) => {
+  if (r == null) return "—";
+  return (r >= 0 ? "+" : "") + r.toFixed(2) + "R";
+};
+const rColor = (r) => {
+  if (r == null) return "var(--muted)";
+  if (r >= 2)  return "#00e5a0";
+  if (r >= 1)  return "#60d394";
+  if (r >= 0)  return "#fbbf24";
+  if (r >= -1) return "#fb923c";
+  return "#ff4d6a";
+};
+
+// A trade is "reviewed" if it has a grade OR a setup tag filled in
+const isReviewed = (n) => !!(n?.grade || n?.setup?.trim());
 
 function parseCSV(text) {
   const lines   = text.trim().split("\n");
@@ -84,16 +122,16 @@ function parseCSV(text) {
     })
     .filter(r => r[headers[0]])
     .map((r, i) => {
-      const symbol    = r.symbol    || r.Symbol    || r.instrument  || r.Instrument || "UNKNOWN";
-      const rawSide   = (r.side     || r.Side      || r.action      || r.Action     || "LONG").toUpperCase();
-      const side      = rawSide.includes("SELL") || rawSide.includes("SHORT") ? "SHORT" : "LONG";
-      const pnl       = parseFloat(r.pnl       || r.PnL   || r["P&L"]      || r.profit  || 0);
-      const entryPrice= parseFloat(r.entryPrice || r.entry_price    || r["Entry Price"] || 0);
-      const exitPrice = parseFloat(r.exitPrice  || r.exit_price     || r["Exit Price"]  || 0);
-      const contracts = parseInt  (r.contracts  || r.qty            || r.Qty            || 1);
-      const date      = r.date    || r.Date      || new Date().toISOString().slice(0,10);
-      const entryTime = r.entryTime || r.entry_time || r["Entry Time"] || "00:00:00";
-      const exitTime  = r.exitTime  || r.exit_time  || r["Exit Time"]  || "00:00:00";
+      const symbol     = r.symbol    || r.Symbol    || r.instrument || r.Instrument || "UNKNOWN";
+      const rawSide    = (r.side     || r.Side      || r.action     || r.Action     || "LONG").toUpperCase();
+      const side       = rawSide.includes("SELL") || rawSide.includes("SHORT") ? "SHORT" : "LONG";
+      const pnl        = parseFloat(r.pnl       || r.PnL  || r["P&L"]       || r.profit || 0);
+      const entryPrice = parseFloat(r.entryPrice || r.entry_price || r["Entry Price"] || 0);
+      const exitPrice  = parseFloat(r.exitPrice  || r.exit_price  || r["Exit Price"]  || 0);
+      const contracts  = parseInt  (r.contracts  || r.qty         || r.Qty            || 1);
+      const date       = r.date || r.Date || new Date().toISOString().slice(0,10);
+      const entryTime  = r.entryTime || r.entry_time || r["Entry Time"] || "00:00:00";
+      const exitTime   = r.exitTime  || r.exit_time  || r["Exit Time"]  || "00:00:00";
       return { id:`imp_${i}`, date, symbol, side, contracts, entryTime, exitTime, entryPrice, exitPrice, pnl, ticks:0, duration:"—", win: pnl > 0 };
     });
 }
@@ -123,8 +161,9 @@ const SectionTitle = ({ title, action }) => (
 const Btn = ({ children, onClick, variant="default", style:sx={} }) => {
   const styles = {
     default: { background:"var(--surface2)", border:"1px solid var(--border2)", color:"var(--text)" },
-    primary: { background:"var(--green)",    border:"1px solid var(--green)",   color:"#000",        fontWeight:700 },
+    primary: { background:"var(--green)",    border:"1px solid var(--green)",   color:"#000", fontWeight:700 },
     ghost:   { background:"transparent",     border:"1px solid var(--border)",  color:"var(--muted)" },
+    active:  { background:"var(--blue-dim)", border:"1px solid var(--blue)",    color:"var(--blue)", fontWeight:700 },
   };
   return (
     <button onClick={onClick} style={{ ...styles[variant], padding:"8px 16px", borderRadius:7, fontSize:12, fontWeight:600, display:"inline-flex", alignItems:"center", gap:6, transition:"all 0.15s", ...sx }}>
@@ -154,7 +193,6 @@ function ImportModal({ onClose, onImport }) {
       <div onClick={e=>e.stopPropagation()} style={{ background:"var(--surface)", border:"1px solid var(--border2)", borderRadius:14, padding:32, width:520 }}>
         <div style={{ fontFamily:"var(--font-display)", fontSize:20, fontWeight:700, marginBottom:4 }}>Import Trades</div>
         <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginBottom:24 }}>CSV · Tradovate · Rithmic · NinjaTrader · Sierra Chart</div>
-
         <div
           onDragOver={e=>{e.preventDefault();setDragging(true);}}
           onDragLeave={()=>setDragging(false)}
@@ -166,7 +204,6 @@ function ImportModal({ onClose, onImport }) {
           <div style={{ fontFamily:"var(--font-mono)", fontSize:13, color:dragging?"var(--green)":"var(--muted)" }}>Drop CSV here or click to browse</div>
           <input ref={fileRef} type="file" accept=".csv" style={{ display:"none" }} onChange={e=>handleFile(e.target.files[0])} />
         </div>
-
         {parsed ? (
           <div>
             <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--green)", marginBottom:10 }}>✓ Found {parsed.length} trades</div>
@@ -206,17 +243,30 @@ function TradeDetail({ trade, notes, playbooks, onUpdate, onClose, onPrev, onNex
   const n   = notes[trade.id] || {};
   const upd = (k, v) => onUpdate(trade.id, k, v);
 
+  const risk1R = parseFloat(n.risk1R) || null;
+  const rVal   = calcR(trade.pnl, n.risk1R);
+
+  const toggleMistake = (mid) => {
+    const current = n.mistakes || [];
+    const next = current.includes(mid) ? current.filter(x=>x!==mid) : [...current, mid];
+    upd("mistakes", next);
+  };
+
   return (
     <div style={{ position:"fixed", inset:0, background:"#000b", zIndex:500, display:"flex", alignItems:"flex-start", justifyContent:"flex-end" }} onClick={onClose}>
-      <div onClick={e=>e.stopPropagation()} style={{ width:480, height:"100vh", background:"var(--surface)", borderLeft:"1px solid var(--border2)", overflowY:"auto", display:"flex", flexDirection:"column" }}>
+      <div onClick={e=>e.stopPropagation()} style={{ width:500, height:"100vh", background:"var(--surface)", borderLeft:"1px solid var(--border2)", overflowY:"auto", display:"flex", flexDirection:"column" }}>
 
         {/* Header */}
         <div style={{ padding:"20px 24px 16px", borderBottom:"1px solid var(--border)", position:"sticky", top:0, background:"var(--surface)", zIndex:10 }}>
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
-            <div style={{ display:"flex", gap:8 }}>
+            <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
               <Chip color={sideColor(trade.side)}>{trade.side === "LONG" ? "▲" : "▼"} {trade.side}</Chip>
               <Chip color="var(--muted)">{trade.symbol}</Chip>
               <Chip color="var(--muted)">{trade.date}</Chip>
+              {isReviewed(n)
+                ? <Chip color="var(--green)">✓ Reviewed</Chip>
+                : <Chip color="var(--gold)">○ Unreviewed</Chip>
+              }
             </div>
             <div style={{ display:"flex", gap:4, alignItems:"center" }}>
               <button onClick={onPrev} disabled={!hasPrev} style={{ background:"none", border:"none", color:hasPrev?"var(--muted)":"var(--dim)", fontSize:18 }}>‹</button>
@@ -224,24 +274,68 @@ function TradeDetail({ trade, notes, playbooks, onUpdate, onClose, onPrev, onNex
               <button onClick={onClose} style={{ background:"none", border:"none", color:"var(--muted)", fontSize:22, lineHeight:1 }}>×</button>
             </div>
           </div>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8 }}>
+
+          {/* Snapshot — now includes R-multiple */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8 }}>
             {[
-              { l:"P&L",       v:fmt(trade.pnl,1),                              c:trade.pnl>=0?"var(--green)":"var(--red)" },
-              { l:"TICKS",     v:(trade.ticks>=0?"+":"")+trade.ticks,           c:trade.ticks>=0?"var(--green)":"var(--red)" },
-              { l:"DURATION",  v:trade.duration,                                 c:"var(--text)" },
-              { l:"ENTRY",     v:trade.entryPrice,                               c:"var(--text)" },
-              { l:"EXIT",      v:trade.exitPrice,                                c:"var(--text)" },
-              { l:"CONTRACTS", v:trade.contracts,                                c:"var(--text)" },
+              { l:"P&L",      v:fmt(trade.pnl,1),                    c:trade.pnl>=0?"var(--green)":"var(--red)" },
+              { l:"R-MULTIPLE",v:fmtR(rVal),                          c:rColor(rVal) },
+              { l:"TICKS",    v:(trade.ticks>=0?"+":"")+trade.ticks,  c:trade.ticks>=0?"var(--green)":"var(--red)" },
+              { l:"DURATION", v:trade.duration,                        c:"var(--text)" },
+              { l:"ENTRY",    v:trade.entryPrice,                      c:"var(--text)" },
+              { l:"EXIT",     v:trade.exitPrice,                       c:"var(--text)" },
+              { l:"CONTRACTS",v:trade.contracts,                       c:"var(--text)" },
+              { l:"1R RISK",  v:risk1R?`$${risk1R}`:"set below",      c:risk1R?"var(--text)":"var(--dim)" },
             ].map(s=>(
               <div key={s.l} style={{ background:"var(--surface2)", borderRadius:7, padding:"10px 12px" }}>
                 <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.08em", marginBottom:4 }}>{s.l}</div>
-                <div style={{ fontFamily:"var(--font-mono)", fontSize:14, fontWeight:600, color:s.c }}>{s.v}</div>
+                <div style={{ fontFamily:"var(--font-mono)", fontSize:13, fontWeight:600, color:s.c }}>{s.v}</div>
               </div>
             ))}
           </div>
         </div>
 
         <div style={{ padding:"20px 24px", flex:1 }}>
+
+          {/* ── R-MULTIPLE INPUT ── */}
+          <div style={{ background:"var(--surface2)", border:"1px solid var(--border2)", borderRadius:9, padding:"14px 16px", marginBottom:20 }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+              <div>
+                <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:2 }}>R-MULTIPLE CALCULATOR</div>
+                <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--dim)" }}>R = P&L ÷ Initial Risk (1R)</div>
+              </div>
+              {rVal != null && (
+                <div style={{ fontFamily:"var(--font-display)", fontSize:26, fontWeight:800, color:rColor(rVal) }}>{fmtR(rVal)}</div>
+              )}
+            </div>
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+              <div style={{ flex:1 }}>
+                <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", marginBottom:5, letterSpacing:"0.08em" }}>MY 1R RISK ON THIS TRADE ($)</div>
+                <div style={{ display:"flex", alignItems:"center", gap:0, background:"var(--bg)", border:"1px solid var(--border)", borderRadius:7, overflow:"hidden" }}>
+                  <span style={{ padding:"9px 12px", fontFamily:"var(--font-mono)", fontSize:13, color:"var(--muted)", borderRight:"1px solid var(--border)" }}>$</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={n.risk1R||""}
+                    onChange={e=>upd("risk1R", e.target.value)}
+                    placeholder="e.g. 50"
+                    style={{ flex:1, background:"transparent", border:"none", padding:"9px 12px", fontSize:13, outline:"none" }}
+                  />
+                </div>
+              </div>
+              {rVal != null && (
+                <div style={{ background:rColor(rVal)+"15", border:`1px solid ${rColor(rVal)}40`, borderRadius:8, padding:"12px 16px", textAlign:"center", minWidth:90 }}>
+                  <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", marginBottom:4 }}>RESULT</div>
+                  <div style={{ fontFamily:"var(--font-display)", fontSize:20, fontWeight:700, color:rColor(rVal) }}>{fmtR(rVal)}</div>
+                  <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", marginTop:2 }}>
+                    {rVal>=2?"Great R":rVal>=1?"Positive R":rVal>=0?"Scratch":rVal>=-1?"Small loss":"Large loss"}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Grade + Rule Adherence */}
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:20 }}>
             <div>
@@ -260,6 +354,40 @@ function TradeDetail({ trade, notes, playbooks, onUpdate, onClose, onPrev, onNex
                 ))}
               </div>
             </div>
+          </div>
+
+          {/* ── MISTAKE TAGS ── */}
+          <div style={{ marginBottom:20 }}>
+            <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:10 }}>MISTAKE TAGS <span style={{ color:"var(--dim)", fontWeight:400 }}>— select all that apply</span></div>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:7 }}>
+              {MISTAKE_OPTIONS.map(m => {
+                const active = (n.mistakes||[]).includes(m.id);
+                return (
+                  <button
+                    key={m.id}
+                    className="mistake-tag"
+                    onClick={()=>toggleMistake(m.id)}
+                    style={{
+                      padding:"5px 12px",
+                      borderRadius:20,
+                      border:`1px solid ${active ? m.color : "var(--border)"}`,
+                      background: active ? m.color+"22" : "transparent",
+                      color: active ? m.color : "var(--muted)",
+                      fontSize:11,
+                      fontWeight: active ? 700 : 400,
+                      fontFamily:"var(--font-mono)",
+                    }}
+                  >
+                    {active ? "✕ " : ""}{m.label}
+                  </button>
+                );
+              })}
+            </div>
+            {(n.mistakes||[]).length > 0 && (
+              <div style={{ marginTop:10, fontFamily:"var(--font-mono)", fontSize:10, color:"var(--red)" }}>
+                ⚠ {(n.mistakes||[]).length} mistake{(n.mistakes||[]).length>1?"s":""} tagged — cost: {fmt(trade.pnl < 0 ? trade.pnl : 0, 1)}
+              </div>
+            )}
           </div>
 
           {/* Journal fields */}
@@ -310,6 +438,26 @@ function Dashboard({ trades, notes }) {
     const avgW   = wins.length   ? wins.reduce((a,t)=>a+t.pnl,0)/wins.length : 0;
     const avgL   = losses.length ? Math.abs(losses.reduce((a,t)=>a+t.pnl,0)/losses.length) : 0;
     const pf     = avgL > 0 ? wins.reduce((a,t)=>a+t.pnl,0) / Math.abs(losses.reduce((a,t)=>a+t.pnl,0)) : 0;
+
+    // R-multiple stats
+    const rTrades = trades.filter(t=>calcR(t.pnl, notes[t.id]?.risk1R) != null);
+    const rVals   = rTrades.map(t=>calcR(t.pnl, notes[t.id]?.risk1R));
+    const avgR    = rVals.length ? rVals.reduce((a,b)=>a+b,0)/rVals.length : null;
+    const totalR  = rVals.length ? rVals.reduce((a,b)=>a+b,0) : null;
+
+    // Reviewed stats
+    const reviewed   = trades.filter(t=>isReviewed(notes[t.id]));
+    const unreviewed = trades.length - reviewed.length;
+
+    // Mistake stats
+    const mistakeCounts = {};
+    trades.forEach(t=>{
+      (notes[t.id]?.mistakes||[]).forEach(m=>{
+        mistakeCounts[m] = (mistakeCounts[m]||0)+1;
+      });
+    });
+    const topMistakes = Object.entries(mistakeCounts).sort(([,a],[,b])=>b-a).slice(0,4);
+
     const byDate = {};
     trades.forEach(t=>{
       if (!byDate[t.date]) byDate[t.date]={pnl:0,count:0,wins:0};
@@ -324,7 +472,8 @@ function Dashboard({ trades, notes }) {
     trades.forEach(t=>{ const g=notes[t.id]?.grade; if(g){ if(!gradeMap[g]) gradeMap[g]={pnl:0,count:0}; gradeMap[g].pnl+=t.pnl; gradeMap[g].count++; } });
     const best  = days.reduce((a,b)=>a[1].pnl>b[1].pnl?a:b, days[0]);
     const worst = days.reduce((a,b)=>a[1].pnl<b[1].pnl?a:b, days[0]);
-    return { total, winRate:wins.length/trades.length, avgW, avgL, pf, wCount:wins.length, lCount:losses.length, tCount:trades.length, curve, bySymbol, gradeMap, best, worst };
+
+    return { total, winRate:wins.length/trades.length, avgW, avgL, pf, wCount:wins.length, lCount:losses.length, tCount:trades.length, curve, bySymbol, gradeMap, best, worst, avgR, totalR, rCount:rVals.length, reviewed:reviewed.length, unreviewed, topMistakes };
   },[trades,notes]);
 
   if (!s) return (
@@ -349,19 +498,53 @@ function Dashboard({ trades, notes }) {
   return (
     <div>
       {/* KPIs */}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:12, marginBottom:20 }}>
-        <StatCard label="NET P&L"       value={fmtAbs(s.total,0)}    color={s.total>=0?"var(--green)":"var(--red)"}        delay="0s"     big />
-        <StatCard label="WIN RATE"      value={pct(s.winRate)}        color="var(--blue)"                                   delay="0.05s"     />
-        <StatCard label="PROFIT FACTOR" value={s.pf.toFixed(2)}       color={s.pf>=2?"var(--green)":"var(--gold)"}          delay="0.10s"     />
-        <StatCard label="AVG WIN"       value={fmtAbs(s.avgW,0)}      color="var(--green)" sub={`${s.wCount} winners`}      delay="0.15s"     />
-        <StatCard label="AVG LOSS"      value={fmtAbs(s.avgL,0)}      color="var(--red)"   sub={`${s.lCount} losers`}       delay="0.20s"     />
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:12, marginBottom:12 }}>
+        <StatCard label="NET P&L"       value={fmtAbs(s.total,0)}   color={s.total>=0?"var(--green)":"var(--red)"}     delay="0s"    big />
+        <StatCard label="WIN RATE"      value={pct(s.winRate)}       color="var(--blue)"                                delay="0.05s"    />
+        <StatCard label="PROFIT FACTOR" value={s.pf.toFixed(2)}      color={s.pf>=2?"var(--green)":"var(--gold)"}       delay="0.10s"    />
+        <StatCard label="AVG WIN"       value={fmtAbs(s.avgW,0)}     color="var(--green)" sub={`${s.wCount} winners`}   delay="0.15s"    />
+        <StatCard label="AVG LOSS"      value={fmtAbs(s.avgL,0)}     color="var(--red)"   sub={`${s.lCount} losers`}    delay="0.20s"    />
+      </div>
+
+      {/* R-Multiple + Review row */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:12 }}>
+        <div className="fade-up" style={{ animationDelay:"0.05s", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px" }}>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>AVG R-MULTIPLE</div>
+          <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:s.avgR!=null?rColor(s.avgR):"var(--dim)", lineHeight:1 }}>
+            {s.avgR!=null ? fmtR(s.avgR) : "—"}
+          </div>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:6 }}>
+            {s.rCount > 0 ? `${s.rCount} trades with 1R set` : "Set 1R in trade detail to track"}
+          </div>
+        </div>
+        <div className="fade-up" style={{ animationDelay:"0.08s", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px" }}>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>TOTAL R EARNED</div>
+          <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:s.totalR!=null&&s.totalR>=0?"var(--green)":s.totalR!=null?"var(--red)":"var(--dim)", lineHeight:1 }}>
+            {s.totalR!=null ? fmtR(s.totalR) : "—"}
+          </div>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:6 }}>across {s.rCount} graded trades</div>
+        </div>
+        <div className="fade-up" style={{ animationDelay:"0.11s", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px" }}>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>REVIEWED</div>
+          <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:"var(--green)", lineHeight:1 }}>{s.reviewed}<span style={{ fontSize:14, color:"var(--muted)", fontWeight:400 }}>/{s.tCount}</span></div>
+          <div style={{ marginTop:8, height:4, background:"var(--border)", borderRadius:2 }}>
+            <div style={{ height:"100%", width:`${s.reviewed/s.tCount*100}%`, background:"var(--green)", borderRadius:2, transition:"width 0.5s ease" }}/>
+          </div>
+        </div>
+        <div className="fade-up" style={{ animationDelay:"0.14s", background:"var(--surface)", border:`1px solid ${s.unreviewed>0?"var(--gold)40":"var(--border)"}`, borderRadius:10, padding:"18px 20px" }}>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>NEEDS REVIEW</div>
+          <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:s.unreviewed>0?"var(--gold)":"var(--green)", lineHeight:1 }}>{s.unreviewed}</div>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:6 }}>
+            {s.unreviewed===0 ? "All caught up ✓" : `trade${s.unreviewed!==1?"s":""} without review`}
+          </div>
+        </div>
       </div>
 
       {/* Charts */}
       <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr", gap:12, marginBottom:12 }}>
         <div className="fade-up-2" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"20px 20px 12px" }}>
           <SectionTitle title="Equity Curve" />
-          <ResponsiveContainer width="100%" height={200}>
+          <ResponsiveContainer width="100%" height={180}>
             <AreaChart data={s.curve} margin={{top:4,right:4,bottom:0,left:-20}}>
               <defs>
                 <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
@@ -377,10 +560,9 @@ function Dashboard({ trades, notes }) {
             </AreaChart>
           </ResponsiveContainer>
         </div>
-
         <div className="fade-up-2" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"20px 20px 12px" }}>
           <SectionTitle title="Daily P&L" />
-          <ResponsiveContainer width="100%" height={200}>
+          <ResponsiveContainer width="100%" height={180}>
             <BarChart data={s.curve} margin={{top:4,right:4,bottom:0,left:-20}}>
               <XAxis dataKey="date" tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
               <YAxis tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
@@ -413,23 +595,32 @@ function Dashboard({ trades, notes }) {
           ))}
         </div>
 
-        {/* Day extremes */}
+        {/* Top mistakes */}
         <div className="fade-up-3" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:20 }}>
-          <SectionTitle title="Day Extremes"/>
-          <div style={{ marginBottom:16 }}>
-            <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>BEST DAY</div>
-            <div style={{ fontFamily:"var(--font-display)", fontSize:26, fontWeight:700, color:"var(--green)" }}>{fmt(s.best[1].pnl,0)}</div>
-            <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:4 }}>{s.best[0]} · {s.best[1].count} trades</div>
-          </div>
-          <div style={{ height:1, background:"var(--border)", marginBottom:16 }}/>
-          <div>
-            <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>WORST DAY</div>
-            <div style={{ fontFamily:"var(--font-display)", fontSize:26, fontWeight:700, color:"var(--red)" }}>{fmt(s.worst[1].pnl,0)}</div>
-            <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:4 }}>{s.worst[0]} · {s.worst[1].count} trades</div>
-          </div>
+          <SectionTitle title="Top Mistakes"/>
+          {s.topMistakes.length === 0 ? (
+            <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--dim)", paddingTop:8 }}>Tag mistakes in trade detail to see patterns</div>
+          ) : (
+            s.topMistakes.map(([mid, count])=>{
+              const m = MISTAKE_OPTIONS.find(x=>x.id===mid);
+              if (!m) return null;
+              const maxCount = s.topMistakes[0][1];
+              return (
+                <div key={mid} style={{ marginBottom:12 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
+                    <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:m.color, fontWeight:600 }}>{m.label}</span>
+                    <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)" }}>{count}×</span>
+                  </div>
+                  <div style={{ height:3, background:"var(--border)", borderRadius:2 }}>
+                    <div style={{ height:"100%", width:`${count/maxCount*100}%`, background:m.color, borderRadius:2 }}/>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
 
-        {/* By grade */}
+        {/* Grade breakdown */}
         <div className="fade-up-3" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:20 }}>
           <SectionTitle title="By Grade"/>
           {Object.keys(s.gradeMap).length === 0
@@ -453,25 +644,49 @@ function Dashboard({ trades, notes }) {
 
 // ─── TRADE LOG ────────────────────────────────────────────────────────────────
 function TradeLog({ trades, notes, playbooks, onSelect, onImport }) {
-  const [fSide, setFSide] = useState("all");
-  const [fSym,  setFSym]  = useState("all");
-  const [fDate, setFDate] = useState("all");
-  const [modal, setModal] = useState(false);
+  const [fSide,     setFSide]     = useState("all");
+  const [fSym,      setFSym]      = useState("all");
+  const [fDate,     setFDate]     = useState("all");
+  const [fReviewed, setFReviewed] = useState("all"); // "all" | "reviewed" | "unreviewed"
+  const [modal,     setModal]     = useState(false);
 
   const symbols = [...new Set(trades.map(t=>t.symbol))];
   const dates   = [...new Set(trades.map(t=>t.date))].sort();
-  const filtered = trades.filter(t=>
-    (fSide==="all"||t.side===fSide) &&
-    (fSym ==="all"||t.symbol===fSym) &&
-    (fDate==="all"||t.date===fDate)
-  );
+
+  const filtered = trades.filter(t => {
+    const rev = isReviewed(notes[t.id]);
+    return (
+      (fSide==="all"      || t.side===fSide) &&
+      (fSym ==="all"      || t.symbol===fSym) &&
+      (fDate==="all"      || t.date===fDate) &&
+      (fReviewed==="all"  || (fReviewed==="reviewed" ? rev : !rev))
+    );
+  });
+
+  const unreviewedCount = trades.filter(t=>!isReviewed(notes[t.id])).length;
 
   return (
     <div>
       {modal && <ImportModal onClose={()=>setModal(false)} onImport={onImport}/>}
+
+      {/* Filters */}
       <div style={{ display:"flex", gap:10, marginBottom:20, flexWrap:"wrap", alignItems:"center" }}>
         <Btn variant="primary" onClick={()=>setModal(true)}>⬆ Import CSV</Btn>
         <div style={{ flex:1 }}/>
+
+        {/* Reviewed filter — most prominent */}
+        <div style={{ display:"flex", gap:4, background:"var(--surface)", border:"1px solid var(--border)", borderRadius:8, padding:3 }}>
+          {[
+            { v:"all",        l:"All Trades" },
+            { v:"unreviewed", l:`Needs Review${unreviewedCount>0?` (${unreviewedCount})`:""}` },
+            { v:"reviewed",   l:"Reviewed" },
+          ].map(o=>(
+            <button key={o.v} onClick={()=>setFReviewed(o.v)} style={{ padding:"5px 12px", borderRadius:6, border:"none", background:fReviewed===o.v?(o.v==="unreviewed"?"var(--gold)22":"var(--surface3)"):"transparent", color:fReviewed===o.v?(o.v==="unreviewed"?"var(--gold)":"var(--text)"):"var(--muted)", fontSize:11, fontFamily:"var(--font-mono)", fontWeight:fReviewed===o.v?700:400, transition:"all 0.15s" }}>
+              {o.l}
+            </button>
+          ))}
+        </div>
+
         {[{v:"all",l:"All"},{v:"LONG",l:"Long"},{v:"SHORT",l:"Short"}].map(o=>(
           <button key={o.v} onClick={()=>setFSide(o.v)} style={{ background:fSide===o.v?"var(--surface3)":"var(--surface)", border:`1px solid ${fSide===o.v?"var(--border2)":"var(--border)"}`, color:fSide===o.v?"var(--text)":"var(--muted)", padding:"6px 14px", borderRadius:6, fontSize:11, fontFamily:"var(--font-mono)", fontWeight:600 }}>{o.l}</button>
         ))}
@@ -485,9 +700,10 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport }) {
         </select>
       </div>
 
+      {/* Table */}
       <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, overflow:"hidden" }}>
-        <div style={{ display:"grid", gridTemplateColumns:"80px 90px 64px 50px 94px 94px 90px 90px 110px 60px 60px 54px", padding:"10px 16px", borderBottom:"1px solid var(--border)", gap:0 }}>
-          {["DATE","SYMBOL","SIDE","QTY","ENTRY TIME","EXIT TIME","ENTRY $","EXIT $","P&L","TICKS","NOTES","GRADE"].map(h=>(
+        <div style={{ display:"grid", gridTemplateColumns:"80px 90px 64px 50px 90px 90px 86px 86px 100px 56px 60px 60px 54px", padding:"10px 16px", borderBottom:"1px solid var(--border)", gap:0 }}>
+          {["DATE","SYMBOL","SIDE","QTY","ENTRY TIME","EXIT TIME","ENTRY $","EXIT $","P&L","R-MULT","STATUS","NOTES","GRADE"].map(h=>(
             <div key={h} style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.08em", fontWeight:700 }}>{h}</div>
           ))}
         </div>
@@ -497,10 +713,13 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport }) {
         )}
 
         {filtered.map(t=>{
-          const n = notes[t.id]||{};
-          const filled = Object.values(n).filter(v=>v&&v!==null&&v!=="").length;
+          const n      = notes[t.id]||{};
+          const filled = Object.values(n).filter(v=>v&&v!==null&&v!==""&&(!Array.isArray(v)||v.length>0)).length;
+          const rev    = isReviewed(n);
+          const rVal   = calcR(t.pnl, n.risk1R);
+          const mistakes = n.mistakes||[];
           return (
-            <div key={t.id} className="hover-row" onClick={()=>onSelect(t)} style={{ display:"grid", gridTemplateColumns:"80px 90px 64px 50px 94px 94px 90px 90px 110px 60px 60px 54px", padding:"11px 16px", borderBottom:"1px solid var(--border)", gap:0, alignItems:"center", cursor:"pointer", background:!t.win?"#ff4d6a05":"transparent", transition:"background 0.1s" }}>
+            <div key={t.id} className="hover-row" onClick={()=>onSelect(t)} style={{ display:"grid", gridTemplateColumns:"80px 90px 64px 50px 90px 90px 86px 86px 100px 56px 60px 60px 54px", padding:"11px 16px", borderBottom:"1px solid var(--border)", gap:0, alignItems:"center", cursor:"pointer", background:!t.win?"#ff4d6a05":"transparent", transition:"background 0.1s" }}>
               <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)" }}>{t.date.slice(5)}</span>
               <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:600 }}>{t.symbol}</span>
               <Chip color={sideColor(t.side)}>{t.side==="LONG"?"▲L":"▼S"}</Chip>
@@ -510,8 +729,12 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport }) {
               <span style={{ fontFamily:"var(--font-mono)", fontSize:11 }}>{t.entryPrice}</span>
               <span style={{ fontFamily:"var(--font-mono)", fontSize:11 }}>{t.exitPrice}</span>
               <span style={{ fontFamily:"var(--font-mono)", fontSize:13, fontWeight:700, color:t.pnl>=0?"var(--green)":"var(--red)" }}>{fmt(t.pnl,1)}</span>
-              <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:t.ticks>=0?"var(--green)":"var(--red)" }}>{t.ticks>=0?"+":""}{t.ticks}</span>
-              <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:filled>0?"var(--blue)":"var(--dim)" }}>{filled>0?`●${filled}`:"○"}</span>
+              <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:700, color:rColor(rVal) }}>{fmtR(rVal)}</span>
+              <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:rev?"var(--green)":"var(--gold)" }}>{rev?"✓ done":"○ open"}</span>
+              <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:filled>0?"var(--blue)":"var(--dim)" }}>
+                {mistakes.length>0&&<span style={{ color:"var(--red)", marginRight:2 }}>⚠</span>}
+                {filled>0?`●${filled}`:"○"}
+              </span>
               {n.grade
                 ? <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:700, color:gradeColor(n.grade), background:gradeColor(n.grade)+"22", padding:"2px 7px", borderRadius:4, display:"inline-block" }}>{n.grade}</span>
                 : <span style={{ color:"var(--dim)", fontSize:11 }}>—</span>
@@ -526,13 +749,16 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport }) {
         <span style={{ color:filtered.reduce((a,t)=>a+t.pnl,0)>=0?"var(--green)":"var(--red)", fontWeight:600 }}>
           {fmt(filtered.reduce((a,t)=>a+t.pnl,0),1)}
         </span>
+        {fReviewed==="unreviewed" && unreviewedCount>0 && (
+          <span style={{ color:"var(--gold)", marginLeft:16 }}>⚠ {unreviewedCount} trades need review</span>
+        )}
       </div>
     </div>
   );
 }
 
 // ─── CALENDAR ─────────────────────────────────────────────────────────────────
-function Calendar({ trades }) {
+function Calendar({ trades, notes }) {
   const [month,    setMonth]    = useState(new Date().getMonth()+1);
   const [year,     setYear]     = useState(new Date().getFullYear());
   const [selDay,   setSelDay]   = useState(null);
@@ -547,10 +773,10 @@ function Calendar({ trades }) {
     return m;
   },[trades]);
 
-  const dim      = new Date(year, month, 0).getDate();
-  const first    = new Date(year, month-1, 1).getDay();
-  const maxAbs   = Math.max(...Object.values(byDate).map(d=>Math.abs(d.pnl)),1);
-  const MONTHS   = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const dim    = new Date(year, month, 0).getDate();
+  const first  = new Date(year, month-1, 1).getDay();
+  const maxAbs = Math.max(...Object.values(byDate).map(d=>Math.abs(d.pnl)),1);
+  const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
   const selKey  = selDay ? `${year}-${String(month).padStart(2,"0")}-${String(selDay).padStart(2,"0")}` : null;
   const selData = selKey ? byDate[selKey] : null;
@@ -563,28 +789,30 @@ function Calendar({ trades }) {
           <div style={{ fontFamily:"var(--font-display)", fontSize:20, fontWeight:700, minWidth:160, textAlign:"center" }}>{MONTHS[month-1]} {year}</div>
           <button onClick={()=>{if(month===12){setMonth(1);setYear(y=>y+1);}else setMonth(m=>m+1);}} style={{ background:"none", border:"none", color:"var(--muted)", fontSize:20 }}>›</button>
         </div>
-
         <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:5, marginBottom:5 }}>
           {["SUN","MON","TUE","WED","THU","FRI","SAT"].map(d=>(
             <div key={d} style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", textAlign:"center", padding:"4px 0", letterSpacing:"0.08em" }}>{d}</div>
           ))}
         </div>
-
         <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:5 }}>
           {Array(first).fill(null).map((_,i)=><div key={"e"+i}/>)}
           {Array(dim).fill(null).map((_,i)=>{
-            const day     = i+1;
-            const dateKey = `${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
-            const d       = byDate[dateKey];
-            const sel     = selDay===day;
-            const intensity = d ? Math.min(Math.abs(d.pnl)/maxAbs,1) : 0;
-            const weekend   = ((first+i)%7===0)||((first+i)%7===6);
+            const day=i+1;
+            const dateKey=`${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+            const d=byDate[dateKey];
+            const sel=selDay===day;
+            const intensity=d?Math.min(Math.abs(d.pnl)/maxAbs,1):0;
+            const weekend=((first+i)%7===0)||((first+i)%7===6);
+            const dayUnreviewed = d ? d.trades.filter(t=>!isReviewed(notes[t.id])).length : 0;
             return (
-              <div key={day} onClick={()=>d&&setSelDay(day===selDay?null:day)} style={{ aspectRatio:"1", borderRadius:8, padding:6, border:`1px solid ${sel?"var(--blue)":d?"var(--border2)":"var(--border)"}`, background:d?(d.pnl>=0?`rgba(0,229,160,${intensity*0.3})`:`rgba(255,77,106,${intensity*0.3})`):weekend?"transparent":"var(--surface)", cursor:d?"pointer":"default", display:"flex", flexDirection:"column", justifyContent:"space-between", transition:"all 0.15s", opacity:weekend&&!d?0.3:1 }}>
+              <div key={day} onClick={()=>d&&setSelDay(day===selDay?null:day)} style={{ aspectRatio:"1", borderRadius:8, padding:6, border:`1px solid ${sel?"var(--blue)":d?"var(--border2)":"var(--border)"}`, background:d?(d.pnl>=0?`rgba(0,229,160,${intensity*0.3})`:`rgba(255,77,106,${intensity*0.3})`):weekend?"transparent":"var(--surface)", cursor:d?"pointer":"default", display:"flex", flexDirection:"column", justifyContent:"space-between", transition:"all 0.15s", opacity:weekend&&!d?0.3:1, position:"relative" }}>
                 <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:d?"var(--text)":"var(--dim)" }}>{day}</div>
                 {d&&<>
                   <div style={{ fontFamily:"var(--font-mono)", fontSize:10, fontWeight:700, color:d.pnl>=0?"var(--green)":"var(--red)", lineHeight:1 }}>{d.pnl>=0?"+":""}{Math.round(d.pnl)}</div>
-                  <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)" }}>{d.trades.length}T</div>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <span style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)" }}>{d.trades.length}T</span>
+                    {dayUnreviewed>0&&<span style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--gold)" }}>○{dayUnreviewed}</span>}
+                  </div>
                 </>}
               </div>
             );
@@ -606,27 +834,27 @@ function Calendar({ trades }) {
                 <div style={{ fontFamily:"var(--font-display)", fontSize:22, fontWeight:700, color:"var(--blue)" }}>{Math.round(selData.wins/selData.trades.length*100)}%</div>
               </div>
             </div>
-            {selData.trades.map(t=>(
-              <div key={t.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 12px", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:7, marginBottom:6 }}>
-                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                  <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)" }}>{t.entryTime}</span>
-                  <Chip color={sideColor(t.side)}>{t.side}</Chip>
-                  <span style={{ fontFamily:"var(--font-mono)", fontSize:11 }}>{t.symbol}</span>
+            {selData.trades.map(t=>{
+              const rVal = calcR(t.pnl, notes[t.id]?.risk1R);
+              const rev  = isReviewed(notes[t.id]);
+              return (
+                <div key={t.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 12px", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:7, marginBottom:6 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)" }}>{t.entryTime}</span>
+                    <Chip color={sideColor(t.side)}>{t.side}</Chip>
+                    <span style={{ fontFamily:"var(--font-mono)", fontSize:11 }}>{t.symbol}</span>
+                  </div>
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    {rVal!=null&&<span style={{ fontFamily:"var(--font-mono)", fontSize:11, fontWeight:700, color:rColor(rVal) }}>{fmtR(rVal)}</span>}
+                    <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:700, color:t.pnl>=0?"var(--green)":"var(--red)" }}>{fmt(t.pnl,1)}</span>
+                    <span style={{ fontFamily:"var(--font-mono)", fontSize:9, color:rev?"var(--green)":"var(--gold)" }}>{rev?"✓":"○"}</span>
+                  </div>
                 </div>
-                <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:700, color:t.pnl>=0?"var(--green)":"var(--red)" }}>{fmt(t.pnl,1)}</span>
-              </div>
-            ))}
+              );
+            })}
             <div style={{ marginTop:14 }}>
               <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>DAILY REVIEW</div>
-              <textarea
-                value={dayNotes[selKey]||""}
-                onChange={e=>setDayNotes(p=>({...p,[selKey]:e.target.value}))}
-                placeholder="Overall read, how you felt, themes that worked, what to carry forward…"
-                rows={6}
-                style={{ width:"100%", background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:8, padding:"10px 12px", fontSize:12, resize:"vertical", lineHeight:1.7, outline:"none" }}
-                onFocus={e=>e.target.style.borderColor="var(--blue)"}
-                onBlur={e=>e.target.style.borderColor="var(--border)"}
-              />
+              <textarea value={dayNotes[selKey]||""} onChange={e=>setDayNotes(p=>({...p,[selKey]:e.target.value}))} placeholder="Overall read, how you felt, themes that worked, what to carry forward…" rows={5} style={{ width:"100%", background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:8, padding:"10px 12px", fontSize:12, resize:"vertical", lineHeight:1.7, outline:"none" }} onFocus={e=>e.target.style.borderColor="var(--blue)"} onBlur={e=>e.target.style.borderColor="var(--border)"} />
             </div>
           </div>
         ) : (
@@ -651,7 +879,9 @@ function Playbook({ trades, notes, playbooks, setPlaybooks }) {
     const tagged = trades.filter(t=>(notes[t.id]?.setup||"").toLowerCase().includes(pb.name.toLowerCase()));
     const wins   = tagged.filter(t=>t.win);
     const pnl    = tagged.reduce((a,t)=>a+t.pnl,0);
-    return { ...pb, count:tagged.length, wins:wins.length, pnl, wr:tagged.length?wins.length/tagged.length:0 };
+    const rVals  = tagged.map(t=>calcR(t.pnl,notes[t.id]?.risk1R)).filter(r=>r!=null);
+    const avgR   = rVals.length ? rVals.reduce((a,b)=>a+b,0)/rVals.length : null;
+    return { ...pb, count:tagged.length, wins:wins.length, pnl, wr:tagged.length?wins.length/tagged.length:0, avgR };
   }),[trades,notes,playbooks]);
 
   const add = () => {
@@ -704,11 +934,16 @@ function Playbook({ trades, notes, playbooks, setPlaybooks }) {
               </div>
               <button onClick={()=>setPlaybooks(p=>p.filter(x=>x.id!==pb.id))} style={{ background:"none", border:"none", color:"var(--dim)", fontSize:18 }}>×</button>
             </div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8 }}>
-              {[{l:"TRADES",v:pb.count},{l:"WIN RATE",v:pb.count?Math.round(pb.wr*100)+"%":"—"},{l:"NET P&L",v:pb.count?fmt(pb.pnl,0):"—"}].map(s=>(
-                <div key={s.l} style={{ background:"var(--surface2)", borderRadius:7, padding:"10px 8px", textAlign:"center" }}>
-                  <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", marginBottom:4 }}>{s.l}</div>
-                  <div style={{ fontFamily:"var(--font-display)", fontSize:18, fontWeight:700, color:s.l==="WIN RATE"&&pb.count?pb.color:s.l==="NET P&L"&&pb.count?(pb.pnl>=0?"var(--green)":"var(--red)"):"var(--text)" }}>{s.v}</div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:6 }}>
+              {[
+                { l:"TRADES",   v:pb.count },
+                { l:"WIN RATE", v:pb.count?Math.round(pb.wr*100)+"%":"—", c:pb.count?pb.color:undefined },
+                { l:"NET P&L",  v:pb.count?fmt(pb.pnl,0):"—", c:pb.count?(pb.pnl>=0?"var(--green)":"var(--red)"):undefined },
+                { l:"AVG R",    v:pb.avgR!=null?fmtR(pb.avgR):"—", c:pb.avgR!=null?rColor(pb.avgR):undefined },
+              ].map(s=>(
+                <div key={s.l} style={{ background:"var(--surface2)", borderRadius:7, padding:"10px 6px", textAlign:"center" }}>
+                  <div style={{ fontFamily:"var(--font-mono)", fontSize:8, color:"var(--muted)", marginBottom:4 }}>{s.l}</div>
+                  <div style={{ fontFamily:"var(--font-display)", fontSize:16, fontWeight:700, color:s.c||"var(--text)" }}>{s.v}</div>
                 </div>
               ))}
             </div>
@@ -716,7 +951,6 @@ function Playbook({ trades, notes, playbooks, setPlaybooks }) {
           </div>
         ))}
       </div>
-
       {playbooks.length===0&&<div style={{ textAlign:"center", padding:60, color:"var(--dim)", fontFamily:"var(--font-mono)", fontSize:12 }}>No setups yet — create your first one above</div>}
     </div>
   );
@@ -737,7 +971,6 @@ export default function App() {
   const [playbooks, setPlaybooks] = useState(DEMO_PLAYBOOKS);
   const [selTrade,  setSelTrade]  = useState(null);
 
-  // Persist to localStorage (works in a real browser)
   useEffect(()=>{
     try {
       const t = localStorage.getItem("ej_trades");
@@ -768,15 +1001,16 @@ export default function App() {
     });
   },[]);
 
-  const idx     = selTrade ? trades.indexOf(selTrade) : -1;
+  const idx      = selTrade ? trades.indexOf(selTrade) : -1;
   const totalPnl = trades.reduce((a,t)=>a+t.pnl,0);
   const wins     = trades.filter(t=>t.win).length;
+  const unreviewed = trades.filter(t=>!isReviewed(notes[t.id])).length;
 
   return (
     <div style={{ display:"flex", height:"100vh", overflow:"hidden" }}>
       <GlobalStyles/>
 
-      {/* ── Sidebar ── */}
+      {/* Sidebar */}
       <div style={{ width:220, background:"var(--surface)", borderRight:"1px solid var(--border)", display:"flex", flexDirection:"column", flexShrink:0 }}>
         <div style={{ padding:"24px 20px 20px", borderBottom:"1px solid var(--border)" }}>
           <div style={{ fontFamily:"var(--font-display)", fontSize:22, fontWeight:800, letterSpacing:"-0.5px" }}>
@@ -787,9 +1021,13 @@ export default function App() {
 
         <nav style={{ padding:"12px 10px", flex:1 }}>
           {NAV_ITEMS.map(n=>(
-            <div key={n.id} className="nav-item" onClick={()=>setPage(n.id)} style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 12px", borderRadius:8, marginBottom:3, cursor:"pointer", background:page===n.id?"var(--surface2)":"transparent", color:page===n.id?"var(--text)":"var(--muted)" }}>
+            <div key={n.id} className="nav-item" onClick={()=>setPage(n.id)} style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 12px", borderRadius:8, marginBottom:3, cursor:"pointer", background:page===n.id?"var(--surface2)":"transparent", color:page===n.id?"var(--text)":"var(--muted)", position:"relative" }}>
               <span style={{ fontSize:14, color:page===n.id?"var(--green)":"inherit" }}>{n.icon}</span>
               <span style={{ fontFamily:"var(--font-display)", fontSize:13, fontWeight:600 }}>{n.label}</span>
+              {/* Badge for unreviewed on Trade Log */}
+              {n.id==="trades" && unreviewed > 0 && (
+                <span style={{ marginLeft:"auto", background:"var(--gold)", color:"#000", borderRadius:10, fontSize:9, fontWeight:800, padding:"2px 6px", fontFamily:"var(--font-mono)" }}>{unreviewed}</span>
+              )}
             </div>
           ))}
         </nav>
@@ -805,14 +1043,14 @@ export default function App() {
         </div>
       </div>
 
-      {/* ── Main ── */}
+      {/* Main */}
       <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
         <div style={{ padding:"16px 28px", borderBottom:"1px solid var(--border)", display:"flex", alignItems:"center", justifyContent:"space-between", background:"var(--bg)", flexShrink:0 }}>
           <div style={{ fontFamily:"var(--font-display)", fontSize:16, fontWeight:700 }}>
             {NAV_ITEMS.find(n=>n.id===page)?.label}
           </div>
           <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)" }}>
-            {trades.length} trades loaded
+            {trades.length} trades · {unreviewed > 0 ? <span style={{ color:"var(--gold)" }}>{unreviewed} unreviewed</span> : <span style={{ color:"var(--green)" }}>all reviewed ✓</span>}
           </div>
         </div>
 
@@ -824,7 +1062,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* ── Detail panel ── */}
+      {/* Detail panel */}
       {selTrade && (
         <TradeDetail
           trade={selTrade}
