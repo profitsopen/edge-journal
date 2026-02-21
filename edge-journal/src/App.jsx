@@ -430,7 +430,7 @@ function TradeDetail({ trade, notes, playbooks, onUpdate, onClose, onPrev, onNex
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
-function Dashboard({ trades, notes }) {
+function Dashboard({ trades, notes, dayMeta, setDayMeta, onSelectTrade }) {
   const s = useMemo(()=>{
     if (!trades.length) return null;
     const wins   = trades.filter(t=>t.win);
@@ -440,41 +440,27 @@ function Dashboard({ trades, notes }) {
     const avgL   = losses.length ? Math.abs(losses.reduce((a,t)=>a+t.pnl,0)/losses.length) : 0;
     const pf     = avgL > 0 ? wins.reduce((a,t)=>a+t.pnl,0) / Math.abs(losses.reduce((a,t)=>a+t.pnl,0)) : 0;
 
-    // R-multiple stats
     const rTrades = trades.filter(t=>calcR(t.pnl, notes[t.id]?.risk1R) != null);
     const rVals   = rTrades.map(t=>calcR(t.pnl, notes[t.id]?.risk1R));
     const avgR    = rVals.length ? rVals.reduce((a,b)=>a+b,0)/rVals.length : null;
     const totalR  = rVals.length ? rVals.reduce((a,b)=>a+b,0) : null;
 
-    // Reviewed stats
     const reviewed   = trades.filter(t=>isReviewed(notes[t.id]));
     const unreviewed = trades.length - reviewed.length;
 
-    // Mistake stats
     const mistakeCounts = {};
-    trades.forEach(t=>{
-      (notes[t.id]?.mistakes||[]).forEach(m=>{
-        mistakeCounts[m] = (mistakeCounts[m]||0)+1;
-      });
-    });
+    trades.forEach(t=>{ (notes[t.id]?.mistakes||[]).forEach(m=>{ mistakeCounts[m] = (mistakeCounts[m]||0)+1; }); });
     const topMistakes = Object.entries(mistakeCounts).sort(([,a],[,b])=>b-a).slice(0,4);
 
     const byDate = {};
-    trades.forEach(t=>{
-      if (!byDate[t.date]) byDate[t.date]={pnl:0,count:0,wins:0};
-      byDate[t.date].pnl+=t.pnl; byDate[t.date].count++; if(t.win) byDate[t.date].wins++;
-    });
+    trades.forEach(t=>{ if (!byDate[t.date]) byDate[t.date]={pnl:0,count:0,wins:0}; byDate[t.date].pnl+=t.pnl; byDate[t.date].count++; if(t.win) byDate[t.date].wins++; });
     const days = Object.entries(byDate).sort(([a],[b])=>a.localeCompare(b));
     let run=0;
     const curve = days.map(([date,d])=>{ run+=d.pnl; return {date:date.slice(5),cum:run,day:d.pnl}; });
     const bySymbol = {};
     trades.forEach(t=>{ if(!bySymbol[t.symbol]) bySymbol[t.symbol]={pnl:0,count:0,wins:0}; bySymbol[t.symbol].pnl+=t.pnl; bySymbol[t.symbol].count++; if(t.win) bySymbol[t.symbol].wins++; });
-    const gradeMap = {};
-    trades.forEach(t=>{ const g=notes[t.id]?.grade; if(g){ if(!gradeMap[g]) gradeMap[g]={pnl:0,count:0}; gradeMap[g].pnl+=t.pnl; gradeMap[g].count++; } });
-    const best  = days.reduce((a,b)=>a[1].pnl>b[1].pnl?a:b, days[0]);
-    const worst = days.reduce((a,b)=>a[1].pnl<b[1].pnl?a:b, days[0]);
 
-    return { total, winRate:wins.length/trades.length, avgW, avgL, pf, wCount:wins.length, lCount:losses.length, tCount:trades.length, curve, bySymbol, gradeMap, best, worst, avgR, totalR, rCount:rVals.length, reviewed:reviewed.length, unreviewed, topMistakes };
+    return { total, winRate:wins.length/trades.length, avgW, avgL, pf, wCount:wins.length, lCount:losses.length, tCount:trades.length, curve, bySymbol, avgR, totalR, rCount:rVals.length, reviewed:reviewed.length, unreviewed, topMistakes };
   },[trades,notes]);
 
   if (!s) return (
@@ -498,145 +484,80 @@ function Dashboard({ trades, notes }) {
 
   return (
     <div>
-      {/* KPIs */}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:12, marginBottom:12 }}>
-        <StatCard label="NET P&L"       value={fmtAbs(s.total,0)}   color={s.total>=0?"var(--green)":"var(--red)"}     delay="0s"    big />
-        <StatCard label="WIN RATE"      value={pct(s.winRate)}       color="var(--blue)"                                delay="0.05s"    />
-        <StatCard label="PROFIT FACTOR" value={s.pf.toFixed(2)}      color={s.pf>=2?"var(--green)":"var(--gold)"}       delay="0.10s"    />
-        <StatCard label="AVG WIN"       value={fmtAbs(s.avgW,0)}     color="var(--green)" sub={`${s.wCount} winners`}   delay="0.15s"    />
-        <StatCard label="AVG LOSS"      value={fmtAbs(s.avgL,0)}     color="var(--red)"   sub={`${s.lCount} losers`}    delay="0.20s"    />
+        <StatCard label="NET P&L" value={fmtAbs(s.total,0)} color={s.total>=0?"var(--green)":"var(--red)"} delay="0s" big />
+        <StatCard label="WIN RATE" value={pct(s.winRate)} color="var(--blue)" delay="0.05s" />
+        <StatCard label="PROFIT FACTOR" value={s.pf.toFixed(2)} color={s.pf>=2?"var(--green)":"var(--gold)"} delay="0.10s" />
+        <StatCard label="AVG WIN" value={fmtAbs(s.avgW,0)} color="var(--green)" sub={`${s.wCount} winners`} delay="0.15s" />
+        <StatCard label="AVG LOSS" value={fmtAbs(s.avgL,0)} color="var(--red)" sub={`${s.lCount} losers`} delay="0.20s" />
       </div>
 
-      {/* R-Multiple + Review row */}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:12 }}>
-        <div className="fade-up" style={{ animationDelay:"0.05s", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px" }}>
-          <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>AVG R-MULTIPLE</div>
-          <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:s.avgR!=null?rColor(s.avgR):"var(--dim)", lineHeight:1 }}>
-            {s.avgR!=null ? fmtR(s.avgR) : "—"}
-          </div>
-          <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:6 }}>
-            {s.rCount > 0 ? `${s.rCount} trades with 1R set` : "Set 1R in trade detail to track"}
-          </div>
-        </div>
-        <div className="fade-up" style={{ animationDelay:"0.08s", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px" }}>
-          <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>TOTAL R EARNED</div>
-          <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:s.totalR!=null&&s.totalR>=0?"var(--green)":s.totalR!=null?"var(--red)":"var(--dim)", lineHeight:1 }}>
-            {s.totalR!=null ? fmtR(s.totalR) : "—"}
-          </div>
-          <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:6 }}>across {s.rCount} graded trades</div>
-        </div>
-        <div className="fade-up" style={{ animationDelay:"0.11s", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px" }}>
-          <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>REVIEWED</div>
-          <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:"var(--green)", lineHeight:1 }}>{s.reviewed}<span style={{ fontSize:14, color:"var(--muted)", fontWeight:400 }}>/{s.tCount}</span></div>
-          <div style={{ marginTop:8, height:4, background:"var(--border)", borderRadius:2 }}>
-            <div style={{ height:"100%", width:`${s.reviewed/s.tCount*100}%`, background:"var(--green)", borderRadius:2, transition:"width 0.5s ease" }}/>
-          </div>
-        </div>
-        <div className="fade-up" style={{ animationDelay:"0.14s", background:"var(--surface)", border:`1px solid ${s.unreviewed>0?"var(--gold)40":"var(--border)"}`, borderRadius:10, padding:"18px 20px" }}>
-          <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>NEEDS REVIEW</div>
-          <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:s.unreviewed>0?"var(--gold)":"var(--green)", lineHeight:1 }}>{s.unreviewed}</div>
-          <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:6 }}>
-            {s.unreviewed===0 ? "All caught up ✓" : `trade${s.unreviewed!==1?"s":""} without review`}
-          </div>
-        </div>
+        <div className="fade-up" style={{ animationDelay:"0.05s", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px" }}><div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>AVG R-MULTIPLE</div><div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:s.avgR!=null?rColor(s.avgR):"var(--dim)", lineHeight:1 }}>{s.avgR!=null ? fmtR(s.avgR) : "—"}</div><div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:6 }}>{s.rCount > 0 ? `${s.rCount} trades with 1R set` : "Set 1R in trade detail to track"}</div></div>
+        <div className="fade-up" style={{ animationDelay:"0.08s", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px" }}><div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>TOTAL R EARNED</div><div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:s.totalR!=null&&s.totalR>=0?"var(--green)":s.totalR!=null?"var(--red)":"var(--dim)", lineHeight:1 }}>{s.totalR!=null ? fmtR(s.totalR) : "—"}</div><div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:6 }}>across {s.rCount} graded trades</div></div>
+        <div className="fade-up" style={{ animationDelay:"0.11s", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px" }}><div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>REVIEWED</div><div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:"var(--green)", lineHeight:1 }}>{s.reviewed}<span style={{ fontSize:14, color:"var(--muted)", fontWeight:400 }}>/{s.tCount}</span></div></div>
+        <div className="fade-up" style={{ animationDelay:"0.14s", background:"var(--surface)", border:`1px solid ${s.unreviewed>0?"var(--gold)40":"var(--border)"}`, borderRadius:10, padding:"18px 20px" }}><div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>NEEDS REVIEW</div><div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:s.unreviewed>0?"var(--gold)":"var(--green)", lineHeight:1 }}>{s.unreviewed}</div></div>
       </div>
 
-      {/* Charts */}
       <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr", gap:12, marginBottom:12 }}>
-        <div className="fade-up-2" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"20px 20px 12px" }}>
-          <SectionTitle title="Equity Curve" />
-          <ResponsiveContainer width="100%" height={180}>
-            <AreaChart data={s.curve} margin={{top:4,right:4,bottom:0,left:-20}}>
-              <defs>
-                <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#00e5a0" stopOpacity={0.2}/>
-                  <stop offset="95%" stopColor="#00e5a0" stopOpacity={0}/>
-                </linearGradient>
-              </defs>
-              <XAxis dataKey="date" tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
-              <YAxis tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
-              <Tooltip content={<TT/>}/>
-              <ReferenceLine y={0} stroke="var(--border2)" strokeDasharray="3 3"/>
-              <Area type="monotone" dataKey="cum" stroke="#00e5a0" strokeWidth={2} fill="url(#g1)" dot={{fill:"#00e5a0",r:4}}/>
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-        <div className="fade-up-2" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"20px 20px 12px" }}>
-          <SectionTitle title="Daily P&L" />
-          <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={s.curve} margin={{top:4,right:4,bottom:0,left:-20}}>
-              <XAxis dataKey="date" tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
-              <YAxis tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
-              <Tooltip content={({active,payload})=>active&&payload?.length?<div style={{background:"var(--surface2)",border:"1px solid var(--border2)",borderRadius:8,padding:"8px 12px",fontFamily:"var(--font-mono)",fontSize:12,color:payload[0].value>=0?"var(--green)":"var(--red)",fontWeight:600}}>{fmt(payload[0].value,0)}</div>:null}/>
-              <ReferenceLine y={0} stroke="var(--border2)"/>
-              <Bar dataKey="day" radius={[4,4,0,0]}>
-                {s.curve.map((d,i)=><Cell key={i} fill={d.day>=0?"#00e5a0":"#ff4d6a"}/>)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* Bottom row */}
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 }}>
-        {/* By symbol */}
-        <div className="fade-up-3" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:20 }}>
-          <SectionTitle title="By Symbol"/>
-          {Object.entries(s.bySymbol).map(([sym,d])=>(
-            <div key={sym} style={{ marginBottom:14 }}>
-              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
-                <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:600 }}>{sym}</span>
-                <span style={{ fontFamily:"var(--font-mono)", fontSize:12, color:d.pnl>=0?"var(--green)":"var(--red)", fontWeight:600 }}>{fmt(d.pnl,0)}</span>
-              </div>
-              <div style={{ height:3, background:"var(--border)", borderRadius:2 }}>
-                <div style={{ height:"100%", width:`${d.wins/d.count*100}%`, background:d.pnl>=0?"var(--green)":"var(--red)", borderRadius:2 }}/>
-              </div>
-              <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", marginTop:4 }}>{d.count} trades · {Math.round(d.wins/d.count*100)}% WR</div>
-            </div>
-          ))}
+        <div style={{ display:"grid", gap:12 }}>
+          <div className="fade-up-2" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"20px 20px 12px" }}>
+            <SectionTitle title="Equity Curve" />
+            <ResponsiveContainer width="100%" height={180}>
+              <AreaChart data={s.curve} margin={{top:4,right:4,bottom:0,left:-20}}>
+                <defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#00e5a0" stopOpacity={0.2}/><stop offset="95%" stopColor="#00e5a0" stopOpacity={0}/></linearGradient></defs>
+                <XAxis dataKey="date" tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
+                <YAxis tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
+                <Tooltip content={<TT/>}/><ReferenceLine y={0} stroke="var(--border2)" strokeDasharray="3 3"/>
+                <Area type="monotone" dataKey="cum" stroke="#00e5a0" strokeWidth={2} fill="url(#g1)" dot={{fill:"#00e5a0",r:4}}/>
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="fade-up-3" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:20 }}>
+            <SectionTitle title="Calendar"/>
+            <DashboardCalendar trades={trades} notes={notes} dayMeta={dayMeta} setDayMeta={setDayMeta} onSelectTrade={onSelectTrade} />
+          </div>
         </div>
 
-        {/* Top mistakes */}
-        <div className="fade-up-3" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:20 }}>
-          <SectionTitle title="Top Mistakes"/>
-          {s.topMistakes.length === 0 ? (
-            <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--dim)", paddingTop:8 }}>Tag mistakes in trade detail to see patterns</div>
-          ) : (
-            s.topMistakes.map(([mid, count])=>{
+        <div style={{ display:"grid", gap:12, alignContent:"start" }}>
+          <div className="fade-up-2" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"20px 20px 12px" }}>
+            <SectionTitle title="Daily P&L" />
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={s.curve} margin={{top:4,right:4,bottom:0,left:-20}}>
+                <XAxis dataKey="date" tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
+                <YAxis tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
+                <Tooltip content={({active,payload})=>active&&payload?.length?<div style={{background:"var(--surface2)",border:"1px solid var(--border2)",borderRadius:8,padding:"8px 12px",fontFamily:"var(--font-mono)",fontSize:12,color:payload[0].value>=0?"var(--green)":"var(--red)",fontWeight:600}}>{fmt(payload[0].value,0)}</div>:null}/>
+                <ReferenceLine y={0} stroke="var(--border2)"/>
+                <Bar dataKey="day" radius={[4,4,0,0]}>{s.curve.map((d,i)=><Cell key={i} fill={d.day>=0?"#00e5a0":"#ff4d6a"}/>)}</Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="fade-up-3" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:20 }}>
+            <SectionTitle title="By Symbol"/>
+            {Object.entries(s.bySymbol).map(([sym,d])=>(
+              <div key={sym} style={{ marginBottom:14 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}><span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:600 }}>{sym}</span><span style={{ fontFamily:"var(--font-mono)", fontSize:12, color:d.pnl>=0?"var(--green)":"var(--red)", fontWeight:600 }}>{fmt(d.pnl,0)}</span></div>
+                <div style={{ height:3, background:"var(--border)", borderRadius:2 }}><div style={{ height:"100%", width:`${d.wins/d.count*100}%`, background:d.pnl>=0?"var(--green)":"var(--red)", borderRadius:2 }}/></div>
+                <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", marginTop:4 }}>{d.count} trades · {Math.round(d.wins/d.count*100)}% WR</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="fade-up-3" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:20 }}>
+            <SectionTitle title="Top Mistakes"/>
+            {s.topMistakes.length === 0 ? <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--dim)", paddingTop:8 }}>Tag mistakes in trade detail to see patterns</div> : s.topMistakes.map(([mid, count])=>{
               const m = MISTAKE_OPTIONS.find(x=>x.id===mid);
               if (!m) return null;
               const maxCount = s.topMistakes[0][1];
               return (
                 <div key={mid} style={{ marginBottom:12 }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
-                    <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:m.color, fontWeight:600 }}>{m.label}</span>
-                    <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)" }}>{count}×</span>
-                  </div>
-                  <div style={{ height:3, background:"var(--border)", borderRadius:2 }}>
-                    <div style={{ height:"100%", width:`${count/maxCount*100}%`, background:m.color, borderRadius:2 }}/>
-                  </div>
+                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}><span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:m.color, fontWeight:600 }}>{m.label}</span><span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)" }}>{count}×</span></div>
+                  <div style={{ height:3, background:"var(--border)", borderRadius:2 }}><div style={{ height:"100%", width:`${count/maxCount*100}%`, background:m.color, borderRadius:2 }}/></div>
                 </div>
               );
-            })
-          )}
-        </div>
-
-        {/* Grade breakdown */}
-        <div className="fade-up-3" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:20 }}>
-          <SectionTitle title="By Grade"/>
-          {Object.keys(s.gradeMap).length === 0
-            ? <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--dim)", paddingTop:8 }}>Grade trades in the detail panel to see breakdown</div>
-            : ["A","B","C","D","F"].filter(g=>s.gradeMap[g]).map(g=>(
-              <div key={g} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
-                <span style={{ fontFamily:"var(--font-mono)", fontSize:13, fontWeight:700, color:gradeColor(g), width:16 }}>{g}</span>
-                <div style={{ flex:1, height:3, background:"var(--border)", borderRadius:2 }}>
-                  <div style={{ height:"100%", width:`${s.gradeMap[g].count/s.tCount*100}%`, background:gradeColor(g), borderRadius:2 }}/>
-                </div>
-                <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", width:30, textAlign:"right" }}>{s.gradeMap[g].count}x</span>
-                <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:s.gradeMap[g].pnl>=0?"var(--green)":"var(--red)", width:56, textAlign:"right" }}>{fmt(s.gradeMap[g].pnl,0)}</span>
-              </div>
-            ))
-          }
+            })}
+          </div>
         </div>
       </div>
     </div>
@@ -759,62 +680,65 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport }) {
 }
 
 // ─── CALENDAR ─────────────────────────────────────────────────────────────────
-function Calendar({ trades, notes }) {
-  const [month,    setMonth]    = useState(new Date().getMonth()+1);
-  const [year,     setYear]     = useState(new Date().getFullYear());
-  const [selDay,   setSelDay]   = useState(null);
-  const [dayNotes, setDayNotes] = useState({});
+function DashboardCalendar({ trades, notes, dayMeta, setDayMeta, onSelectTrade }) {
+  const [month, setMonth] = useState(new Date().getMonth()+1);
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [selDay, setSelDay] = useState(null);
 
-  const byDate = useMemo(()=>{
-    const m={};
-    trades.forEach(t=>{
-      if(!m[t.date]) m[t.date]={pnl:0,trades:[],wins:0};
-      m[t.date].pnl+=t.pnl; m[t.date].trades.push(t); if(t.win) m[t.date].wins++;
+  const byDate = useMemo(() => {
+    const m = {};
+    trades.forEach(t => {
+      if(!m[t.date]) m[t.date] = { pnl:0, trades:[], wins:0 };
+      m[t.date].pnl += t.pnl;
+      m[t.date].trades.push(t);
+      if (t.win) m[t.date].wins++;
     });
     return m;
-  },[trades]);
+  }, [trades]);
 
-  const dim    = new Date(year, month, 0).getDate();
-  const first  = new Date(year, month-1, 1).getDay();
+  const updateMeta = (date, updater) => {
+    if (!date) return;
+    setDayMeta(prev => {
+      const i = prev.findIndex(d=>d.date===date);
+      if (i === -1) return [...prev, updater({ date, notesHtml:"", image:"" })];
+      return prev.map((d, idx)=>idx===i ? updater(d) : d);
+    });
+  };
+
+  const toPlain = (html="") => html.replace(/<br\s*\/?>(\n)?/g, "\n").replace(/<[^>]+>/g, "");
+  const toHtml = (txt="") => txt.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\n/g,"<br>");
+
+  const dim = new Date(year, month, 0).getDate();
+  const first = new Date(year, month-1, 1).getDay();
   const maxAbs = Math.max(...Object.values(byDate).map(d=>Math.abs(d.pnl)),1);
   const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-
-  const selKey  = selDay ? `${year}-${String(month).padStart(2,"0")}-${String(selDay).padStart(2,"0")}` : null;
+  const selKey = selDay ? `${year}-${String(month).padStart(2,"0")}-${String(selDay).padStart(2,"0")}` : null;
   const selData = selKey ? byDate[selKey] : null;
+  const selectedMeta = dayMeta.find(d=>d.date===selKey);
 
   return (
-    <div style={{ display:"grid", gridTemplateColumns:"1fr 340px", gap:24 }}>
+    <div style={{ display:"grid", gridTemplateColumns:"1fr 320px", gap:16 }}>
       <div>
-        <div style={{ display:"flex", alignItems:"center", gap:16, marginBottom:20 }}>
-          <button onClick={()=>{if(month===1){setMonth(12);setYear(y=>y-1);}else setMonth(m=>m-1);}} style={{ background:"none", border:"none", color:"var(--muted)", fontSize:20 }}>‹</button>
-          <div style={{ fontFamily:"var(--font-display)", fontSize:20, fontWeight:700, minWidth:160, textAlign:"center" }}>{MONTHS[month-1]} {year}</div>
-          <button onClick={()=>{if(month===12){setMonth(1);setYear(y=>y+1);}else setMonth(m=>m+1);}} style={{ background:"none", border:"none", color:"var(--muted)", fontSize:20 }}>›</button>
+        <div style={{ display:"flex", alignItems:"center", gap:16, marginBottom:14 }}>
+          <button type="button" onClick={()=>{if(month===1){setMonth(12);setYear(y=>y-1);}else setMonth(m=>m-1);}} style={{ background:"none", border:"none", color:"var(--muted)", fontSize:18 }}>‹</button>
+          <div style={{ fontFamily:"var(--font-display)", fontSize:18, fontWeight:700, minWidth:150, textAlign:"center" }}>{MONTHS[month-1]} {year}</div>
+          <button type="button" onClick={()=>{if(month===12){setMonth(1);setYear(y=>y+1);}else setMonth(m=>m+1);}} style={{ background:"none", border:"none", color:"var(--muted)", fontSize:18 }}>›</button>
         </div>
         <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:5, marginBottom:5 }}>
-          {["SUN","MON","TUE","WED","THU","FRI","SAT"].map(d=>(
-            <div key={d} style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", textAlign:"center", padding:"4px 0", letterSpacing:"0.08em" }}>{d}</div>
-          ))}
+          {["SUN","MON","TUE","WED","THU","FRI","SAT"].map(d=><div key={d} style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", textAlign:"center", padding:"4px 0", letterSpacing:"0.08em" }}>{d}</div>)}
         </div>
         <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:5 }}>
-          {Array(first).fill(null).map((_,i)=><div key={"e"+i}/>)}
+          {Array(first).fill(null).map((_,i)=><div key={"e"+i}/>) }
           {Array(dim).fill(null).map((_,i)=>{
-            const day=i+1;
-            const dateKey=`${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
-            const d=byDate[dateKey];
-            const sel=selDay===day;
-            const intensity=d?Math.min(Math.abs(d.pnl)/maxAbs,1):0;
-            const weekend=((first+i)%7===0)||((first+i)%7===6);
-            const dayUnreviewed = d ? d.trades.filter(t=>!isReviewed(notes[t.id])).length : 0;
+            const day = i+1;
+            const dateKey = `${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+            const d = byDate[dateKey];
+            const sel = selDay===day;
+            const intensity = d ? Math.min(Math.abs(d.pnl)/maxAbs,1) : 0;
             return (
-              <div key={day} onClick={()=>d&&setSelDay(day===selDay?null:day)} style={{ aspectRatio:"1", borderRadius:8, padding:6, border:`1px solid ${sel?"var(--blue)":d?"var(--border2)":"var(--border)"}`, background:d?(d.pnl>=0?`rgba(0,229,160,${intensity*0.3})`:`rgba(255,77,106,${intensity*0.3})`):weekend?"transparent":"var(--surface)", cursor:d?"pointer":"default", display:"flex", flexDirection:"column", justifyContent:"space-between", transition:"all 0.15s", opacity:weekend&&!d?0.3:1, position:"relative" }}>
+              <div key={day} onClick={()=>d&&setSelDay(day===selDay?null:day)} style={{ aspectRatio:"1", borderRadius:8, padding:6, border:`1px solid ${sel?"var(--blue)":d?"var(--border2)":"var(--border)"}`, background:d?(d.pnl>=0?`rgba(0,229,160,${intensity*0.25})`:`rgba(255,77,106,${intensity*0.25})`):"var(--surface)", cursor:d?"pointer":"default", display:"flex", flexDirection:"column", justifyContent:"space-between" }}>
                 <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:d?"var(--text)":"var(--dim)" }}>{day}</div>
-                {d&&<>
-                  <div style={{ fontFamily:"var(--font-mono)", fontSize:10, fontWeight:700, color:d.pnl>=0?"var(--green)":"var(--red)", lineHeight:1 }}>{d.pnl>=0?"+":""}{Math.round(d.pnl)}</div>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                    <span style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)" }}>{d.trades.length}T</span>
-                    {dayUnreviewed>0&&<span style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--gold)" }}>○{dayUnreviewed}</span>}
-                  </div>
-                </>}
+                {d && <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:d.pnl>=0?"var(--green)":"var(--red)", fontWeight:700 }}>{d.pnl>=0?"+":""}{Math.round(d.pnl)}</div>}
               </div>
             );
           })}
@@ -822,46 +746,28 @@ function Calendar({ trades, notes }) {
       </div>
 
       <div>
-        {selKey&&selData ? (
+        {selKey && selData ? (
           <div className="fade-up">
-            <div style={{ fontFamily:"var(--font-display)", fontSize:16, fontWeight:700, marginBottom:16 }}>{selKey}</div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:16 }}>
-              <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:8, padding:12 }}>
-                <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", marginBottom:4 }}>NET P&L</div>
-                <div style={{ fontFamily:"var(--font-display)", fontSize:22, fontWeight:700, color:selData.pnl>=0?"var(--green)":"var(--red)" }}>{selData.pnl>=0?"+":""}{Math.round(selData.pnl)}</div>
-              </div>
-              <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:8, padding:12 }}>
-                <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", marginBottom:4 }}>WIN RATE</div>
-                <div style={{ fontFamily:"var(--font-display)", fontSize:22, fontWeight:700, color:"var(--blue)" }}>{Math.round(selData.wins/selData.trades.length*100)}%</div>
-              </div>
-            </div>
-            {selData.trades.map(t=>{
-              const rVal = calcR(t.pnl, notes[t.id]?.risk1R);
-              const rev  = isReviewed(notes[t.id]);
-              return (
-                <div key={t.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 12px", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:7, marginBottom:6 }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                    <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)" }}>{t.entryTime}</span>
-                    <Chip color={sideColor(t.side)}>{t.side}</Chip>
-                    <span style={{ fontFamily:"var(--font-mono)", fontSize:11 }}>{t.symbol}</span>
-                  </div>
-                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                    {rVal!=null&&<span style={{ fontFamily:"var(--font-mono)", fontSize:11, fontWeight:700, color:rColor(rVal) }}>{fmtR(rVal)}</span>}
-                    <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:700, color:t.pnl>=0?"var(--green)":"var(--red)" }}>{fmt(t.pnl,1)}</span>
-                    <span style={{ fontFamily:"var(--font-mono)", fontSize:9, color:rev?"var(--green)":"var(--gold)" }}>{rev?"✓":"○"}</span>
-                  </div>
+            <div style={{ fontFamily:"var(--font-display)", fontSize:16, fontWeight:700, marginBottom:10 }}>{selKey}</div>
+            {selData.trades.map(t=>(
+              <div key={t.id} onClick={()=>onSelectTrade?.(t)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 10px", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:7, marginBottom:6, cursor:"pointer" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)" }}>{t.entryTime}</span>
+                  <Chip color={sideColor(t.side)}>{t.side}</Chip>
+                  <span style={{ fontFamily:"var(--font-mono)", fontSize:11 }}>{t.symbol}</span>
                 </div>
-              );
-            })}
-            <div style={{ marginTop:14 }}>
+                <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:700, color:t.pnl>=0?"var(--green)":"var(--red)" }}>{fmt(t.pnl,1)}</span>
+              </div>
+            ))}
+            <div style={{ marginTop:12 }}>
               <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>DAILY REVIEW</div>
-              <textarea value={dayNotes[selKey]||""} onChange={e=>setDayNotes(p=>({...p,[selKey]:e.target.value}))} placeholder="Overall read, how you felt, themes that worked, what to carry forward…" rows={5} style={{ width:"100%", background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:8, padding:"10px 12px", fontSize:12, resize:"vertical", lineHeight:1.7, outline:"none" }} onFocus={e=>e.target.style.borderColor="var(--blue)"} onBlur={e=>e.target.style.borderColor="var(--border)"} />
+              <textarea value={toPlain(selectedMeta?.notesHtml||"")} onChange={e=>updateMeta(selKey, d=>({ ...d, notesHtml: toHtml(e.target.value) }))} placeholder="Overall read, how you felt, themes that worked, what to carry forward…" rows={5} style={{ width:"100%", background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:8, padding:"10px 12px", fontSize:12, resize:"vertical", lineHeight:1.7, outline:"none" }} />
             </div>
           </div>
         ) : (
-          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", height:300, gap:10, color:"var(--dim)" }}>
-            <div style={{ fontSize:40 }}>📅</div>
-            <div style={{ fontFamily:"var(--font-mono)", fontSize:12 }}>Click a trading day to review</div>
+          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", height:280, gap:10, color:"var(--dim)" }}>
+            <div style={{ fontSize:34 }}>📅</div>
+            
           </div>
         )}
       </div>
@@ -963,15 +869,7 @@ const JOURNAL_STORAGE_KEY = "ej_journal_days";
 const toJournalDate = d => new Date(`${d}T00:00:00`);
 const fmtJournalDate = d => toJournalDate(d).toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric" });
 
-function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade }) {
-  const [dayMeta, setDayMeta] = useState(() => {
-    try {
-      const saved = localStorage.getItem(JOURNAL_STORAGE_KEY);
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayMeta, setDayMeta }) {
   const [selectedDayId, setSelectedDayId] = useState("");
   const [editingTrade, setEditingTrade] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -990,9 +888,6 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade }) {
     if (selectedDayId && !dayList.includes(selectedDayId)) setSelectedDayId(dayList[0] || "");
   }, [dayList, selectedDayId]);
 
-  useEffect(() => {
-    localStorage.setItem(JOURNAL_STORAGE_KEY, JSON.stringify(dayMeta));
-  }, [dayMeta]);
 
   const selectedDate = selectedDayId || dayList[0];
   const selectedTrades = useMemo(() => trades.filter(t=>t.date===selectedDate), [trades, selectedDate]);
@@ -1200,7 +1095,6 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade }) {
 const NAV_ITEMS = [
   { id:"dashboard", icon:"◈", label:"Dashboard" },
   { id:"trades",    icon:"≡", label:"Trade Log"  },
-  { id:"calendar",  icon:"▦", label:"Calendar"   },
   { id:"playbook",  icon:"◆", label:"Playbook"   },
   { id:"journal",   icon:"✎", label:"Journal"    },
 ];
@@ -1211,6 +1105,20 @@ export default function App() {
   const [notes,     setNotes]     = useState({});
   const [playbooks, setPlaybooks] = useState(DEMO_PLAYBOOKS);
   const [selTrade,  setSelTrade]  = useState(null);
+  const [journalDays, setJournalDays] = useState(() => {
+    try {
+      const saved = localStorage.getItem(JOURNAL_STORAGE_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(()=>{
+    try {
+      localStorage.setItem(JOURNAL_STORAGE_KEY, JSON.stringify(journalDays));
+    } catch(e) {}
+  }, [journalDays]);
 
 
   useEffect(()=>{
@@ -1318,11 +1226,10 @@ export default function App() {
         </div>
 
         <div style={{ flex:1, overflowY:"auto", padding:"24px 28px" }}>
-          {page==="dashboard" && <Dashboard  trades={trades} notes={notes}/>} 
+          {page==="dashboard" && <Dashboard trades={trades} notes={notes} dayMeta={journalDays} setDayMeta={setJournalDays} onSelectTrade={setSelTrade}/>} 
           {page==="trades"    && <TradeLog   trades={trades} notes={notes} playbooks={playbooks} onSelect={setSelTrade} onImport={importTrades}/>} 
-          {page==="calendar"  && <Calendar   trades={trades} notes={notes}/>} 
           {page==="playbook"  && <Playbook   trades={trades} notes={notes} playbooks={playbooks} setPlaybooks={setPlaybooks}/>} 
-          {page==="journal"   && <JournalPage trades={trades} onSelectTrade={setSelTrade} onUpsertTrade={upsertTrade} onDeleteTrade={deleteTrade}/>} 
+          {page==="journal"   && <JournalPage trades={trades} onSelectTrade={setSelTrade} onUpsertTrade={upsertTrade} onDeleteTrade={deleteTrade} dayMeta={journalDays} setDayMeta={setJournalDays}/>} 
         </div>
       </div>
 
