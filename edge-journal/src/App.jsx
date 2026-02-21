@@ -37,6 +37,7 @@ const GlobalStyles = () => (
     .fade-up   { animation: fadeUp 0.35s ease both; }
     .fade-up-2 { animation: fadeUp 0.35s 0.07s ease both; }
     .fade-up-3 { animation: fadeUp 0.35s 0.14s ease both; }
+    .journal-notes:empty::before { content: attr(data-placeholder); color: var(--muted); font-style: italic; }
   `}</style>
 );
 
@@ -158,7 +159,7 @@ const SectionTitle = ({ title, action }) => (
   </div>
 );
 
-const Btn = ({ children, onClick, variant="default", style:sx={} }) => {
+const Btn = ({ children, onClick, variant="default", style:sx={}, ...rest }) => {
   const styles = {
     default: { background:"var(--surface2)", border:"1px solid var(--border2)", color:"var(--text)" },
     primary: { background:"var(--green)",    border:"1px solid var(--green)",   color:"#000", fontWeight:700 },
@@ -166,7 +167,7 @@ const Btn = ({ children, onClick, variant="default", style:sx={} }) => {
     active:  { background:"var(--blue-dim)", border:"1px solid var(--blue)",    color:"var(--blue)", fontWeight:700 },
   };
   return (
-    <button onClick={onClick} style={{ ...styles[variant], padding:"8px 16px", borderRadius:7, fontSize:12, fontWeight:600, display:"inline-flex", alignItems:"center", gap:6, transition:"all 0.15s", ...sx }}>
+    <button type="button" onClick={onClick} style={{ ...styles[variant], padding:"8px 16px", borderRadius:7, fontSize:12, fontWeight:600, display:"inline-flex", alignItems:"center", gap:6, transition:"all 0.15s", ...sx }} {...rest}>
       {children}
     </button>
   );
@@ -956,12 +957,252 @@ function Playbook({ trades, notes, playbooks, setPlaybooks }) {
   );
 }
 
+// ─── JOURNAL PAGE ────────────────────────────────────────────────────────────
+const JOURNAL_STORAGE_KEY = "ej_journal_days";
+
+const toJournalDate = d => new Date(`${d}T00:00:00`);
+const fmtJournalDate = d => toJournalDate(d).toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric" });
+
+function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade }) {
+  const [dayMeta, setDayMeta] = useState(() => {
+    try {
+      const saved = localStorage.getItem(JOURNAL_STORAGE_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [selectedDayId, setSelectedDayId] = useState("");
+  const [editingTrade, setEditingTrade] = useState(null);
+  const [collapsed, setCollapsed] = useState(false);
+  const notesRef = useRef(null);
+  const fileRef = useRef(null);
+
+  const dayMetaMap = useMemo(() => new Map(dayMeta.map(d=>[d.date,d])), [dayMeta]);
+  const dayList = useMemo(() => {
+    const dates = new Set(trades.map(t=>t.date));
+    dayMeta.forEach(d=>dates.add(d.date));
+    return [...dates].sort((a,b)=>toJournalDate(b)-toJournalDate(a));
+  }, [trades, dayMeta]);
+
+  useEffect(() => {
+    if (!selectedDayId && dayList.length) setSelectedDayId(dayList[0]);
+    if (selectedDayId && !dayList.includes(selectedDayId)) setSelectedDayId(dayList[0] || "");
+  }, [dayList, selectedDayId]);
+
+  useEffect(() => {
+    localStorage.setItem(JOURNAL_STORAGE_KEY, JSON.stringify(dayMeta));
+  }, [dayMeta]);
+
+  const selectedDate = selectedDayId || dayList[0];
+  const selectedTrades = useMemo(() => trades.filter(t=>t.date===selectedDate), [trades, selectedDate]);
+  const selectedMeta = dayMetaMap.get(selectedDate) || { date:selectedDate, notesHtml:"", image:"" };
+
+  useEffect(() => {
+    if (notesRef.current) notesRef.current.innerHTML = selectedMeta.notesHtml || "";
+  }, [selectedMeta.notesHtml, selectedDate]);
+
+  const updateMeta = (date, updater) => {
+    if (!date) return;
+    setDayMeta(prev => {
+      const i = prev.findIndex(d=>d.date===date);
+      if (i === -1) return [...prev, updater({ date, notesHtml:"", image:"" })];
+      return prev.map((d, idx)=>idx===i ? updater(d) : d);
+    });
+  };
+
+  const applyFormat = cmd => {
+    notesRef.current?.focus();
+    document.execCommand(cmd, false);
+  };
+
+  const onImageUpload = file => {
+    if (!file || !selectedDate) return;
+    const reader = new FileReader();
+    reader.onload = e => updateMeta(selectedDate, d => ({ ...d, image: String(e.target.result) }));
+    reader.readAsDataURL(file);
+  };
+
+  const dayStats = day => {
+    const dayTrades = trades.filter(t=>t.date===day);
+    const net = dayTrades.reduce((a,t)=>a+Number(t.pnl||0),0);
+    const wins = dayTrades.filter(t=>Number(t.pnl)>0);
+    const losses = dayTrades.filter(t=>Number(t.pnl)<0);
+    const grossWin = wins.reduce((a,t)=>a+Number(t.pnl||0),0);
+    const grossLoss = Math.abs(losses.reduce((a,t)=>a+Number(t.pnl||0),0));
+    return {
+      net,
+      trades: dayTrades.length,
+      avgWin: wins.length ? grossWin / wins.length : 0,
+      avgLoss: losses.length ? losses.reduce((a,t)=>a+Number(t.pnl||0),0) / losses.length : 0,
+      winRate: dayTrades.length ? (wins.length / dayTrades.length) * 100 : 0,
+      pf: grossLoss > 0 ? grossWin / grossLoss : (grossWin > 0 ? grossWin : 0),
+    };
+  };
+
+  const makeDraftFromTrade = t => ({
+    id: t.id,
+    time: t.entryTime?.slice(0,5) || "",
+    symbol: t.symbol || "",
+    side: t.side || "LONG",
+    qty: t.contracts || 1,
+    entry: t.entryPrice ?? "",
+    exit: t.exitPrice ?? "",
+    pnl: t.pnl ?? "",
+  });
+
+  if (!selectedDate) {
+    return <div style={{ color:"var(--muted)", fontFamily:"var(--font-mono)" }}>No trading days available yet.</div>;
+  }
+
+  return (
+    <div style={{ display:"grid", gridTemplateColumns: collapsed?"56px 1fr":"420px 1fr", height:"calc(100vh - 146px)", border:"1px solid var(--border)", borderRadius:10, overflow:"hidden", background:"var(--surface)" }}>
+      <div style={{ borderRight:"1px solid var(--border)", background:"var(--surface)", overflowY:"auto" }}>
+        <div style={{ padding:"10px", borderBottom:"1px solid var(--border)", display:"flex", justifyContent: collapsed?"center":"space-between", alignItems:"center" }}>
+          {!collapsed && <div style={{ fontFamily:"var(--font-display)", fontSize:13, color:"var(--muted)", textTransform:"uppercase", letterSpacing:"0.08em" }}>Daily Summary</div>}
+          <Btn onClick={()=>setCollapsed(v=>!v)} style={{ padding:"4px 8px" }} aria-label={collapsed?"Expand daily summary":"Collapse daily summary"}>{collapsed?"»":"«"}</Btn>
+        </div>
+
+        {!collapsed && dayList.map(day => {
+          const s = dayStats(day);
+          const selectedCard = day===selectedDate;
+          return (
+            <button
+              key={day}
+              onClick={()=>setSelectedDayId(day)}
+              type="button"
+              style={{ width:"100%", textAlign:"left", background:selectedCard?"var(--surface3)":"var(--surface)", border:"none", borderBottom:"1px solid var(--border)", padding:"14px", color:"var(--text)" }}
+              aria-pressed={selectedCard}
+            >
+              <div style={{ fontFamily:"var(--font-mono)", fontSize:12, color:"var(--muted)", marginBottom:8 }}>{fmtJournalDate(day)}</div>
+              <div style={{ fontFamily:"var(--font-display)", fontSize:38, fontWeight:700, color:s.net>=0?"var(--green)":"var(--red)", marginBottom:8 }}>{fmt(s.net,2)}</div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"4px 10px", fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)" }}>
+                <span>Avg Win <b style={{ color:"var(--green)", marginLeft:4 }}>{fmt(s.avgWin,2)}</b></span>
+                <span>Avg Loss <b style={{ color:"var(--red)", marginLeft:4 }}>{fmt(s.avgLoss,2)}</b></span>
+                <span>Win % <b style={{ color:"var(--text)", marginLeft:4 }}>{s.winRate.toFixed(1)}%</b></span>
+                <span>PF <b style={{ color:"var(--text)", marginLeft:4 }}>{s.pf.toFixed(2)}</b></span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{ padding:0, background:"var(--bg)", overflowY:"auto" }}>
+        <div style={{ borderBottom:"1px solid var(--border)", padding:"8px 14px", display:"flex", gap:8 }}>
+          {[["B","bold","Bold"],[<i key="i">I</i>,"italic","Italic"],[<u key="u">U</u>,"underline","Underline"],["•","insertUnorderedList","Bulleted list"],["1.","insertOrderedList","Numbered list"]].map(([label, cmd, aria], i)=>(
+            <Btn key={i} onClick={()=>applyFormat(cmd)} style={{ padding:"6px 10px", minWidth:32 }} aria-label={aria}>{label}</Btn>
+          ))}
+        </div>
+
+        <div style={{ padding:"16px" }}>
+          <div style={{ fontFamily:"var(--font-display)", fontSize:42, fontWeight:700, marginBottom:10 }}>{toJournalDate(selectedDate).toLocaleDateString("en-US", { month:"long", day:"numeric", year:"numeric" })}</div>
+          <div
+            ref={notesRef}
+            contentEditable
+            suppressContentEditableWarning
+            onInput={e=>updateMeta(selectedDate, d=>({ ...d, notesHtml:e.currentTarget.innerHTML==="<br>"?"":e.currentTarget.innerHTML }))}
+            data-placeholder="Type your notes here..."
+            style={{ minHeight:180, outline:"none", color:"var(--text)", fontFamily:"var(--font-mono)", fontSize:14, borderBottom:"1px solid var(--border)", paddingBottom:18 }}
+            className="journal-notes"
+            aria-label="Journal notes"
+          />
+
+          <div style={{ paddingTop:16, marginTop:16 }}>
+            <div style={{ marginBottom:10, fontFamily:"var(--font-display)", fontSize:16 }}>Image</div>
+            {!selectedMeta.image ? (
+              <button type="button" onClick={()=>fileRef.current?.click()} style={{ width:140, height:140, border:"1px dashed var(--border2)", background:"transparent", color:"var(--muted)", fontFamily:"var(--font-mono)" }}>ADD IMAGE</button>
+            ) : (
+              <div>
+                <img src={selectedMeta.image} alt="Journal upload" style={{ maxWidth:360, borderRadius:8, border:"1px solid var(--border)" }} />
+                <div style={{ marginTop:8, display:"flex", gap:8 }}>
+                  <Btn onClick={()=>fileRef.current?.click()}>Replace</Btn>
+                  <Btn onClick={()=>updateMeta(selectedDate, d=>({ ...d, image:"" }))} variant="ghost">Remove</Btn>
+                </div>
+              </div>
+            )}
+            <input ref={fileRef} type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{onImageUpload(e.target.files?.[0]); e.target.value="";}} />
+          </div>
+
+          <div style={{ marginTop:20 }}>
+            <SectionTitle title="Trades" action={<Btn onClick={()=>setEditingTrade({ id:`jr_manual_${Date.now()}`, time:"", symbol:"", side:"LONG", qty:1, entry:"", exit:"", pnl:"" })}>+ Add Trade</Btn>} />
+            {!selectedTrades.length ? (
+              <div style={{ border:"1px dashed var(--border2)", borderRadius:8, padding:16, color:"var(--muted)", fontFamily:"var(--font-mono)", fontSize:12 }}>No trades logged for this day yet.</div>
+            ) : (
+              <div style={{ border:"1px solid var(--border)", borderRadius:8, overflow:"hidden" }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontFamily:"var(--font-mono)", fontSize:12 }}>
+                  <thead>
+                    <tr style={{ background:"var(--surface)" }}>
+                      {["Time","Symbol","Side","Qty","Entry","Exit","P&L","Actions"].map(h=><th key={h} style={{ textAlign:"left", padding:"10px", borderBottom:"1px solid var(--border)" }}>{h}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedTrades.map(t=>(
+                      <tr key={t.id} className="hover-row" onClick={()=>onSelectTrade(t)} style={{ cursor:"pointer" }}>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.entryTime?.slice(0,5)}</td>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.symbol}</td>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.side}</td>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.contracts}</td>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.entryPrice}</td>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.exitPrice}</td>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)", color:t.pnl>=0?"var(--green)":"var(--red)", fontWeight:700 }}>{fmt(t.pnl,2)}</td>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>
+                          <button type="button" onClick={(e)=>{e.stopPropagation(); setEditingTrade(makeDraftFromTrade(t));}} style={{ background:"transparent", border:"none", color:"var(--blue)", marginRight:8 }}>Edit</button>
+                          <button type="button" onClick={(e)=>{e.stopPropagation(); onDeleteTrade(t.id);}} style={{ background:"transparent", border:"none", color:"var(--red)" }}>Delete</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {editingTrade && (
+              <div style={{ marginTop:12, border:"1px solid var(--border)", borderRadius:8, padding:12, display:"grid", gridTemplateColumns:"repeat(7,minmax(0,1fr))", gap:8 }}>
+                {[["time","Time"],["symbol","Symbol"],["side","Side"],["qty","Qty"],["entry","Entry"],["exit","Exit"],["pnl","P&L"]].map(([k,l])=>(
+                  <label key={k} style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", display:"flex", flexDirection:"column", gap:4 }}>
+                    {l}
+                    <input value={editingTrade[k]} onChange={e=>setEditingTrade(p=>({...p,[k]:e.target.value}))} style={{ background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:6, padding:"8px", fontSize:12 }} />
+                  </label>
+                ))}
+                <div style={{ gridColumn:"1 / -1", display:"flex", gap:8 }}>
+                  <Btn onClick={()=>{
+                    const pnl = Number(editingTrade.pnl||0);
+                    const trade = {
+                      id: editingTrade.id,
+                      date: selectedDate,
+                      symbol: editingTrade.symbol,
+                      side: editingTrade.side || "LONG",
+                      contracts: Number(editingTrade.qty||1),
+                      entryTime: `${editingTrade.time || "00:00"}:00`,
+                      exitTime: `${editingTrade.time || "00:00"}:00`,
+                      entryPrice: Number(editingTrade.entry||0),
+                      exitPrice: Number(editingTrade.exit||0),
+                      pnl,
+                      ticks: 0,
+                      duration: "—",
+                      win: pnl > 0,
+                    };
+                    onUpsertTrade(trade);
+                    setEditingTrade(null);
+                  }} variant="primary">Save Trade</Btn>
+                  <Btn onClick={()=>setEditingTrade(null)} variant="ghost">Cancel</Btn>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── APP ROOT ─────────────────────────────────────────────────────────────────
 const NAV_ITEMS = [
   { id:"dashboard", icon:"◈", label:"Dashboard" },
   { id:"trades",    icon:"≡", label:"Trade Log"  },
   { id:"calendar",  icon:"▦", label:"Calendar"   },
   { id:"playbook",  icon:"◆", label:"Playbook"   },
+  { id:"journal",   icon:"✎", label:"Journal"    },
 ];
 
 export default function App() {
@@ -970,6 +1211,7 @@ export default function App() {
   const [notes,     setNotes]     = useState({});
   const [playbooks, setPlaybooks] = useState(DEMO_PLAYBOOKS);
   const [selTrade,  setSelTrade]  = useState(null);
+
 
   useEffect(()=>{
     try {
@@ -999,6 +1241,23 @@ export default function App() {
       const existing = new Set(prev.map(t=>t.id));
       return [...prev, ...incoming.filter(t=>!existing.has(t.id))];
     });
+  },[]);
+
+  const upsertTrade = useCallback((trade)=>{
+    setTrades(prev=>{
+      const exists = prev.some(t=>t.id===trade.id);
+      return exists ? prev.map(t=>t.id===trade.id?{...t,...trade}:t) : [...prev, trade];
+    });
+  },[]);
+
+  const deleteTrade = useCallback((tradeId)=>{
+    setTrades(prev=>prev.filter(t=>t.id!==tradeId));
+    setNotes(prev=>{
+      const next = { ...prev };
+      delete next[tradeId];
+      return next;
+    });
+    setSelTrade(prev=>prev?.id===tradeId?null:prev);
   },[]);
 
   const idx      = selTrade ? trades.indexOf(selTrade) : -1;
@@ -1055,10 +1314,11 @@ export default function App() {
         </div>
 
         <div style={{ flex:1, overflowY:"auto", padding:"24px 28px" }}>
-          {page==="dashboard" && <Dashboard  trades={trades} notes={notes}/>}
-          {page==="trades"    && <TradeLog   trades={trades} notes={notes} playbooks={playbooks} onSelect={setSelTrade} onImport={importTrades}/>}
-          {page==="calendar"  && <Calendar   trades={trades} notes={notes}/>}
-          {page==="playbook"  && <Playbook   trades={trades} notes={notes} playbooks={playbooks} setPlaybooks={setPlaybooks}/>}
+          {page==="dashboard" && <Dashboard  trades={trades} notes={notes}/>} 
+          {page==="trades"    && <TradeLog   trades={trades} notes={notes} playbooks={playbooks} onSelect={setSelTrade} onImport={importTrades}/>} 
+          {page==="calendar"  && <Calendar   trades={trades} notes={notes}/>} 
+          {page==="playbook"  && <Playbook   trades={trades} notes={notes} playbooks={playbooks} setPlaybooks={setPlaybooks}/>} 
+          {page==="journal"   && <JournalPage trades={trades} onSelectTrade={setSelTrade} onUpsertTrade={upsertTrade} onDeleteTrade={deleteTrade}/>} 
         </div>
       </div>
 
