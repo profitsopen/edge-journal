@@ -1,0 +1,13 @@
+# dependencies
+node_modules/
+edge-journal/node_modules/
+
+# build artifacts
+dist/
+edge-journal/dist/
+
+# local env/editor
+.env
+.env.*
+.DS_Store
+.vscode/
