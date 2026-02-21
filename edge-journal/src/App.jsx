@@ -564,6 +564,191 @@ function Dashboard({ trades, notes, dayMeta, setDayMeta, onSelectTrade }) {
   );
 }
 
+
+const toUnixSec = (date, time="00:00:00") => {
+  const safe = `${date}T${(time || "00:00:00").slice(0,8)}`;
+  return Math.floor(new Date(safe).getTime() / 1000);
+};
+
+const getTradeWindow = trade => {
+  const entrySec = toUnixSec(trade.date, trade.entryTime);
+  const hasExit = !!trade.exitTime;
+  const exitSec = hasExit ? toUnixSec(trade.date, trade.exitTime) : null;
+  return {
+    startSec: entrySec - 60 * 60,
+    endSec: hasExit ? exitSec + 60 * 60 : entrySec + 120 * 60,
+    entrySec,
+    exitSec,
+  };
+};
+
+async function fetchCandles({ symbol, startSec, endSec, timeframe="1m" }) {
+  const tf = timeframe === "5m" ? 300 : 60;
+  const candles = [];
+  let t = startSec - (startSec % tf);
+  let base = 100 + (symbol || "SYM").split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 50;
+  while (t <= endSec) {
+    const drift = Math.sin(t / 3600) * 0.4;
+    const open = base;
+    const close = open + drift + (Math.floor(t / tf) % 3 - 1) * 0.12;
+    const high = Math.max(open, close) + 0.35;
+    const low = Math.min(open, close) - 0.35;
+    candles.push({ time: t, open, high, low, close });
+    base = close;
+    t += tf;
+  }
+  return candles;
+}
+
+function TradeChart({ candles, entrySec, exitSec }) {
+  const hostRef = useRef(null);
+
+  useEffect(() => {
+    let chart;
+    let series;
+    let ro;
+    let canceled = false;
+
+    (async () => {
+      try {
+        const dep = "lightweight-charts";
+        const mod = await import(/* @vite-ignore */ dep);
+        if (canceled || !hostRef.current) return;
+        chart = mod.createChart(hostRef.current, {
+          layout: { background: { color: "#0e1419" }, textColor: "#8ea1bd" },
+          grid: { vertLines: { color: "#1e2d3d" }, horzLines: { color: "#1e2d3d" } },
+          rightPriceScale: { borderColor: "#243447" },
+          timeScale: { borderColor: "#243447", timeVisible: true, secondsVisible: false },
+          height: 280,
+        });
+        series = chart.addCandlestickSeries({
+          upColor: "#00e5a0", downColor: "#ff4d6a", borderVisible: false,
+          wickUpColor: "#00e5a0", wickDownColor: "#ff4d6a",
+        });
+        series.setData(candles);
+        const markers = [];
+        if (entrySec) markers.push({ time: entrySec, position: "belowBar", color: "#00e5a0", shape: "arrowUp", text: "Entry" });
+        if (exitSec) markers.push({ time: exitSec, position: "aboveBar", color: "#ff4d6a", shape: "arrowDown", text: "Exit" });
+        if (typeof series.setMarkers === "function") series.setMarkers(markers);
+        chart.timeScale().fitContent();
+        ro = new ResizeObserver(() => {
+          if (!hostRef.current || !chart) return;
+          chart.applyOptions({ width: hostRef.current.clientWidth });
+        });
+        ro.observe(hostRef.current);
+      } catch {
+        if (hostRef.current) hostRef.current.innerHTML = '<div style="color:#5a7a9a;padding:16px;font-family:monospace">Chart module unavailable. Add/install lightweight-charts to render candles.</div>';
+      }
+    })();
+
+    return () => {
+      canceled = true;
+      ro?.disconnect();
+      chart?.remove();
+    };
+  }, [candles, entrySec, exitSec]);
+
+  return <div ref={hostRef} style={{ width: "100%", minHeight: 280 }} aria-label="Trade chart" />;
+}
+
+function TradeDetailPage({ trades, selectedDayId, selectedTradeId, onSelectTradeId, onBack, dayMeta, setDayMeta }) {
+  const [candles, setCandles] = useState([]);
+  const notesRef = useRef(null);
+  const fileRef = useRef(null);
+
+  const selectedTrade = trades.find(t => t.id === selectedTradeId) || null;
+  const dayId = selectedDayId || selectedTrade?.date;
+  const dayTrades = useMemo(() => trades.filter(t => t.date === dayId), [trades, dayId]);
+  const selectedMeta = dayMeta.find(d => d.date === dayId) || { date: dayId, notesHtml: "", image: "" };
+
+  useEffect(() => {
+    if (notesRef.current) notesRef.current.innerHTML = selectedMeta.notesHtml || "";
+  }, [selectedMeta.notesHtml, dayId]);
+
+  const updateMeta = (date, updater) => {
+    if (!date) return;
+    setDayMeta(prev => {
+      const i = prev.findIndex(d=>d.date===date);
+      if (i === -1) return [...prev, updater({ date, notesHtml:"", image:"" })];
+      return prev.map((d, idx)=>idx===i ? updater(d) : d);
+    });
+  };
+
+  useEffect(() => {
+    if (!selectedTrade) return;
+    const { startSec, endSec } = getTradeWindow(selectedTrade);
+    fetchCandles({ symbol: selectedTrade.symbol, startSec, endSec, timeframe: "1m" }).then(setCandles);
+  }, [selectedTrade]);
+
+  if (!selectedTrade) return null;
+  const { entrySec, exitSec } = getTradeWindow(selectedTrade);
+
+  const applyFormat = cmd => {
+    notesRef.current?.focus();
+    document.execCommand(cmd, false);
+  };
+
+  return (
+    <div>
+      <SectionTitle
+        title="Trade Detail"
+        action={<Btn onClick={onBack} variant="ghost">← Back to Day</Btn>}
+      />
+
+      <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:16, marginBottom:12 }}>
+        <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700 }}>{selectedTrade.date} · {selectedTrade.symbol}</div>
+        <div style={{ marginTop:8, display:"flex", gap:14, flexWrap:"wrap", fontFamily:"var(--font-mono)", fontSize:12, color:"var(--muted)" }}>
+          <span>Side: <b style={{ color: sideColor(selectedTrade.side) }}>{selectedTrade.side}</b></span>
+          <span>Qty: {selectedTrade.contracts}</span>
+          <span>Entry: {selectedTrade.entryPrice} @ {selectedTrade.entryTime}</span>
+          <span>Exit: {selectedTrade.exitPrice} @ {selectedTrade.exitTime || "—"}</span>
+          <span>P&L: <b style={{ color: selectedTrade.pnl >= 0 ? "var(--green)" : "var(--red)" }}>{fmt(selectedTrade.pnl,1)}</b></span>
+        </div>
+      </div>
+
+      <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:16, marginBottom:12 }}>
+        <SectionTitle title="Chart" />
+        <TradeChart candles={candles} entrySec={entrySec} exitSec={exitSec} />
+      </div>
+
+      <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:16, marginBottom:12 }}>
+        <SectionTitle title="Journal" />
+        <div style={{ display:"flex", gap:8, marginBottom:8 }}>
+          {[ ["B","bold"], [<i key="i">I</i>,"italic"], [<u key="u">U</u>,"underline"], ["•","insertUnorderedList"], ["1.","insertOrderedList"] ].map(([label,cmd],i)=>(
+            <Btn key={i} onClick={()=>applyFormat(cmd)} style={{ padding:"6px 10px", minWidth:32 }}>{label}</Btn>
+          ))}
+        </div>
+        <div ref={notesRef} contentEditable suppressContentEditableWarning onInput={e=>updateMeta(dayId, d=>({ ...d, notesHtml:e.currentTarget.innerHTML==="<br>"?"":e.currentTarget.innerHTML }))} data-placeholder="Type your notes here..." className="journal-notes" style={{ minHeight:120, border:"1px solid var(--border)", borderRadius:8, padding:10, marginBottom:10 }} />
+
+        {!selectedMeta.image ? (
+          <button type="button" onClick={()=>fileRef.current?.click()} style={{ width:120, height:90, border:"1px dashed var(--border2)", background:"transparent", color:"var(--muted)", fontFamily:"var(--font-mono)" }}>ADD IMAGE</button>
+        ) : (
+          <div>
+            <img src={selectedMeta.image} alt="Journal upload" style={{ maxWidth:300, borderRadius:8, border:"1px solid var(--border)" }} />
+            <div style={{ marginTop:8, display:"flex", gap:8 }}>
+              <Btn onClick={()=>fileRef.current?.click()}>Replace</Btn>
+              <Btn variant="ghost" onClick={()=>updateMeta(dayId, d=>({ ...d, image:"" }))}>Remove</Btn>
+            </div>
+          </div>
+        )}
+        <input ref={fileRef} type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>updateMeta(dayId,d=>({ ...d, image:String(ev.target.result) })); r.readAsDataURL(f); e.target.value=""; }} />
+      </div>
+
+      <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:16 }}>
+        <SectionTitle title={`Trades for ${dayId}`} />
+        {dayTrades.map(t => (
+          <button key={t.id} type="button" onClick={()=>onSelectTradeId(t.id)} style={{ width:"100%", textAlign:"left", background:t.id===selectedTradeId?"var(--surface3)":"transparent", border:"1px solid var(--border)", borderRadius:8, padding:"10px 12px", color:"var(--text)", marginBottom:6 }}>
+            <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginRight:8 }}>{t.entryTime}</span>
+            <span style={{ marginRight:8 }}>{t.symbol}</span>
+            <span style={{ marginRight:8, color:sideColor(t.side) }}>{t.side}</span>
+            <span style={{ color:t.pnl>=0?"var(--green)":"var(--red)", fontWeight:700 }}>{fmt(t.pnl,1)}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── TRADE LOG ────────────────────────────────────────────────────────────────
 function TradeLog({ trades, notes, playbooks, onSelect, onImport }) {
   const [fSide,     setFSide]     = useState("all");
@@ -1102,6 +1287,9 @@ export default function App() {
   const [notes,     setNotes]     = useState({});
   const [playbooks, setPlaybooks] = useState(DEMO_PLAYBOOKS);
   const [selTrade,  setSelTrade]  = useState(null);
+  const [selectedDayId, setSelectedDayId] = useState("");
+  const [selectedTradeId, setSelectedTradeId] = useState("");
+  const [viewMode, setViewMode] = useState("DAY");
   const [journalDays, setJournalDays] = useState(() => {
     try {
       const saved = localStorage.getItem(JOURNAL_STORAGE_KEY);
@@ -1116,6 +1304,10 @@ export default function App() {
       localStorage.setItem(JOURNAL_STORAGE_KEY, JSON.stringify(journalDays));
     } catch(e) {}
   }, [journalDays]);
+
+  useEffect(()=>{
+    if (page !== "trades") setViewMode("DAY");
+  }, [page]);
 
   useEffect(()=>{
     try {
@@ -1145,6 +1337,12 @@ export default function App() {
       const existing = new Set(prev.map(t=>t.id));
       return [...prev, ...incoming.filter(t=>!existing.has(t.id))];
     });
+  },[]);
+
+  const openTradeDetail = useCallback((trade)=>{
+    setSelectedDayId(trade.date);
+    setSelectedTradeId(trade.id);
+    setViewMode("TRADE_DETAIL");
   },[]);
 
   const upsertTrade = useCallback((trade)=>{
@@ -1219,7 +1417,7 @@ export default function App() {
 
         <div style={{ flex:1, overflowY:"auto", padding:"24px 28px" }}>
           {page==="dashboard" && <Dashboard trades={trades} notes={notes} dayMeta={journalDays} setDayMeta={setJournalDays} onSelectTrade={setSelTrade}/>} 
-          {page==="trades"    && <TradeLog   trades={trades} notes={notes} playbooks={playbooks} onSelect={setSelTrade} onImport={importTrades}/>} 
+          {page==="trades"    && (viewMode==="TRADE_DETAIL" ? <TradeDetailPage trades={trades} selectedDayId={selectedDayId} selectedTradeId={selectedTradeId} onSelectTradeId={setSelectedTradeId} onBack={()=>setViewMode("DAY")} dayMeta={journalDays} setDayMeta={setJournalDays} /> : <TradeLog trades={trades} notes={notes} playbooks={playbooks} onSelect={openTradeDetail} onImport={importTrades}/>)} 
           {page==="playbook"  && <Playbook   trades={trades} notes={notes} playbooks={playbooks} setPlaybooks={setPlaybooks}/>} 
           {page==="journal"   && <JournalPage trades={trades} onSelectTrade={setSelTrade} onUpsertTrade={upsertTrade} onDeleteTrade={deleteTrade} dayMeta={journalDays} setDayMeta={setJournalDays}/>} 
         </div>
