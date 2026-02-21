@@ -37,6 +37,7 @@ const GlobalStyles = () => (
     .fade-up   { animation: fadeUp 0.35s ease both; }
     .fade-up-2 { animation: fadeUp 0.35s 0.07s ease both; }
     .fade-up-3 { animation: fadeUp 0.35s 0.14s ease both; }
+    .journal-notes:empty::before { content: attr(data-placeholder); color: var(--muted); font-style: italic; }
   `}</style>
 );
 
@@ -158,7 +159,7 @@ const SectionTitle = ({ title, action }) => (
   </div>
 );
 
-const Btn = ({ children, onClick, variant="default", style:sx={} }) => {
+const Btn = ({ children, onClick, variant="default", style:sx={}, ...rest }) => {
   const styles = {
     default: { background:"var(--surface2)", border:"1px solid var(--border2)", color:"var(--text)" },
     primary: { background:"var(--green)",    border:"1px solid var(--green)",   color:"#000", fontWeight:700 },
@@ -166,7 +167,7 @@ const Btn = ({ children, onClick, variant="default", style:sx={} }) => {
     active:  { background:"var(--blue-dim)", border:"1px solid var(--blue)",    color:"var(--blue)", fontWeight:700 },
   };
   return (
-    <button onClick={onClick} style={{ ...styles[variant], padding:"8px 16px", borderRadius:7, fontSize:12, fontWeight:600, display:"inline-flex", alignItems:"center", gap:6, transition:"all 0.15s", ...sx }}>
+    <button type="button" onClick={onClick} style={{ ...styles[variant], padding:"8px 16px", borderRadius:7, fontSize:12, fontWeight:600, display:"inline-flex", alignItems:"center", gap:6, transition:"all 0.15s", ...sx }} {...rest}>
       {children}
     </button>
   );
@@ -429,7 +430,7 @@ function TradeDetail({ trade, notes, playbooks, onUpdate, onClose, onPrev, onNex
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
-function Dashboard({ trades, notes }) {
+function Dashboard({ trades, notes, dayMeta, setDayMeta, onSelectTrade }) {
   const s = useMemo(()=>{
     if (!trades.length) return null;
     const wins   = trades.filter(t=>t.win);
@@ -439,41 +440,27 @@ function Dashboard({ trades, notes }) {
     const avgL   = losses.length ? Math.abs(losses.reduce((a,t)=>a+t.pnl,0)/losses.length) : 0;
     const pf     = avgL > 0 ? wins.reduce((a,t)=>a+t.pnl,0) / Math.abs(losses.reduce((a,t)=>a+t.pnl,0)) : 0;
 
-    // R-multiple stats
     const rTrades = trades.filter(t=>calcR(t.pnl, notes[t.id]?.risk1R) != null);
     const rVals   = rTrades.map(t=>calcR(t.pnl, notes[t.id]?.risk1R));
     const avgR    = rVals.length ? rVals.reduce((a,b)=>a+b,0)/rVals.length : null;
     const totalR  = rVals.length ? rVals.reduce((a,b)=>a+b,0) : null;
 
-    // Reviewed stats
     const reviewed   = trades.filter(t=>isReviewed(notes[t.id]));
     const unreviewed = trades.length - reviewed.length;
 
-    // Mistake stats
     const mistakeCounts = {};
-    trades.forEach(t=>{
-      (notes[t.id]?.mistakes||[]).forEach(m=>{
-        mistakeCounts[m] = (mistakeCounts[m]||0)+1;
-      });
-    });
+    trades.forEach(t=>{ (notes[t.id]?.mistakes||[]).forEach(m=>{ mistakeCounts[m] = (mistakeCounts[m]||0)+1; }); });
     const topMistakes = Object.entries(mistakeCounts).sort(([,a],[,b])=>b-a).slice(0,4);
 
     const byDate = {};
-    trades.forEach(t=>{
-      if (!byDate[t.date]) byDate[t.date]={pnl:0,count:0,wins:0};
-      byDate[t.date].pnl+=t.pnl; byDate[t.date].count++; if(t.win) byDate[t.date].wins++;
-    });
+    trades.forEach(t=>{ if (!byDate[t.date]) byDate[t.date]={pnl:0,count:0,wins:0}; byDate[t.date].pnl+=t.pnl; byDate[t.date].count++; if(t.win) byDate[t.date].wins++; });
     const days = Object.entries(byDate).sort(([a],[b])=>a.localeCompare(b));
     let run=0;
     const curve = days.map(([date,d])=>{ run+=d.pnl; return {date:date.slice(5),cum:run,day:d.pnl}; });
     const bySymbol = {};
     trades.forEach(t=>{ if(!bySymbol[t.symbol]) bySymbol[t.symbol]={pnl:0,count:0,wins:0}; bySymbol[t.symbol].pnl+=t.pnl; bySymbol[t.symbol].count++; if(t.win) bySymbol[t.symbol].wins++; });
-    const gradeMap = {};
-    trades.forEach(t=>{ const g=notes[t.id]?.grade; if(g){ if(!gradeMap[g]) gradeMap[g]={pnl:0,count:0}; gradeMap[g].pnl+=t.pnl; gradeMap[g].count++; } });
-    const best  = days.reduce((a,b)=>a[1].pnl>b[1].pnl?a:b, days[0]);
-    const worst = days.reduce((a,b)=>a[1].pnl<b[1].pnl?a:b, days[0]);
 
-    return { total, winRate:wins.length/trades.length, avgW, avgL, pf, wCount:wins.length, lCount:losses.length, tCount:trades.length, curve, bySymbol, gradeMap, best, worst, avgR, totalR, rCount:rVals.length, reviewed:reviewed.length, unreviewed, topMistakes };
+    return { total, winRate:wins.length/trades.length, avgW, avgL, pf, wCount:wins.length, lCount:losses.length, tCount:trades.length, curve, bySymbol, avgR, totalR, rCount:rVals.length, reviewed:reviewed.length, unreviewed, topMistakes };
   },[trades,notes]);
 
   if (!s) return (
@@ -497,146 +484,319 @@ function Dashboard({ trades, notes }) {
 
   return (
     <div>
-      {/* KPIs */}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:12, marginBottom:12 }}>
-        <StatCard label="NET P&L"       value={fmtAbs(s.total,0)}   color={s.total>=0?"var(--green)":"var(--red)"}     delay="0s"    big />
-        <StatCard label="WIN RATE"      value={pct(s.winRate)}       color="var(--blue)"                                delay="0.05s"    />
-        <StatCard label="PROFIT FACTOR" value={s.pf.toFixed(2)}      color={s.pf>=2?"var(--green)":"var(--gold)"}       delay="0.10s"    />
-        <StatCard label="AVG WIN"       value={fmtAbs(s.avgW,0)}     color="var(--green)" sub={`${s.wCount} winners`}   delay="0.15s"    />
-        <StatCard label="AVG LOSS"      value={fmtAbs(s.avgL,0)}     color="var(--red)"   sub={`${s.lCount} losers`}    delay="0.20s"    />
+        <StatCard label="NET P&L" value={fmtAbs(s.total,0)} color={s.total>=0?"var(--green)":"var(--red)"} delay="0s" big />
+        <StatCard label="WIN RATE" value={pct(s.winRate)} color="var(--blue)" delay="0.05s" />
+        <StatCard label="PROFIT FACTOR" value={s.pf.toFixed(2)} color={s.pf>=2?"var(--green)":"var(--gold)"} delay="0.10s" />
+        <StatCard label="AVG WIN" value={fmtAbs(s.avgW,0)} color="var(--green)" sub={`${s.wCount} winners`} delay="0.15s" />
+        <StatCard label="AVG LOSS" value={fmtAbs(s.avgL,0)} color="var(--red)" sub={`${s.lCount} losers`} delay="0.20s" />
       </div>
 
-      {/* R-Multiple + Review row */}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:12 }}>
-        <div className="fade-up" style={{ animationDelay:"0.05s", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px" }}>
-          <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>AVG R-MULTIPLE</div>
-          <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:s.avgR!=null?rColor(s.avgR):"var(--dim)", lineHeight:1 }}>
-            {s.avgR!=null ? fmtR(s.avgR) : "—"}
-          </div>
-          <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:6 }}>
-            {s.rCount > 0 ? `${s.rCount} trades with 1R set` : "Set 1R in trade detail to track"}
-          </div>
-        </div>
-        <div className="fade-up" style={{ animationDelay:"0.08s", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px" }}>
-          <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>TOTAL R EARNED</div>
-          <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:s.totalR!=null&&s.totalR>=0?"var(--green)":s.totalR!=null?"var(--red)":"var(--dim)", lineHeight:1 }}>
-            {s.totalR!=null ? fmtR(s.totalR) : "—"}
-          </div>
-          <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:6 }}>across {s.rCount} graded trades</div>
-        </div>
-        <div className="fade-up" style={{ animationDelay:"0.11s", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px" }}>
-          <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>REVIEWED</div>
-          <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:"var(--green)", lineHeight:1 }}>{s.reviewed}<span style={{ fontSize:14, color:"var(--muted)", fontWeight:400 }}>/{s.tCount}</span></div>
-          <div style={{ marginTop:8, height:4, background:"var(--border)", borderRadius:2 }}>
-            <div style={{ height:"100%", width:`${s.reviewed/s.tCount*100}%`, background:"var(--green)", borderRadius:2, transition:"width 0.5s ease" }}/>
-          </div>
-        </div>
-        <div className="fade-up" style={{ animationDelay:"0.14s", background:"var(--surface)", border:`1px solid ${s.unreviewed>0?"var(--gold)40":"var(--border)"}`, borderRadius:10, padding:"18px 20px" }}>
-          <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>NEEDS REVIEW</div>
-          <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:s.unreviewed>0?"var(--gold)":"var(--green)", lineHeight:1 }}>{s.unreviewed}</div>
-          <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:6 }}>
-            {s.unreviewed===0 ? "All caught up ✓" : `trade${s.unreviewed!==1?"s":""} without review`}
-          </div>
-        </div>
+        <div className="fade-up" style={{ animationDelay:"0.05s", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px" }}><div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>AVG R-MULTIPLE</div><div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:s.avgR!=null?rColor(s.avgR):"var(--dim)", lineHeight:1 }}>{s.avgR!=null ? fmtR(s.avgR) : "—"}</div><div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:6 }}>{s.rCount > 0 ? `${s.rCount} trades with 1R set` : "Set 1R in trade detail to track"}</div></div>
+        <div className="fade-up" style={{ animationDelay:"0.08s", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px" }}><div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>TOTAL R EARNED</div><div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:s.totalR!=null&&s.totalR>=0?"var(--green)":s.totalR!=null?"var(--red)":"var(--dim)", lineHeight:1 }}>{s.totalR!=null ? fmtR(s.totalR) : "—"}</div><div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:6 }}>across {s.rCount} graded trades</div></div>
+        <div className="fade-up" style={{ animationDelay:"0.11s", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px" }}><div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>REVIEWED</div><div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:"var(--green)", lineHeight:1 }}>{s.reviewed}<span style={{ fontSize:14, color:"var(--muted)", fontWeight:400 }}>/{s.tCount}</span></div></div>
+        <div className="fade-up" style={{ animationDelay:"0.14s", background:"var(--surface)", border:`1px solid ${s.unreviewed>0?"var(--gold)40":"var(--border)"}`, borderRadius:10, padding:"18px 20px" }}><div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>NEEDS REVIEW</div><div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:s.unreviewed>0?"var(--gold)":"var(--green)", lineHeight:1 }}>{s.unreviewed}</div></div>
       </div>
 
-      {/* Charts */}
       <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr", gap:12, marginBottom:12 }}>
-        <div className="fade-up-2" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"20px 20px 12px" }}>
-          <SectionTitle title="Equity Curve" />
-          <ResponsiveContainer width="100%" height={180}>
-            <AreaChart data={s.curve} margin={{top:4,right:4,bottom:0,left:-20}}>
-              <defs>
-                <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#00e5a0" stopOpacity={0.2}/>
-                  <stop offset="95%" stopColor="#00e5a0" stopOpacity={0}/>
-                </linearGradient>
-              </defs>
-              <XAxis dataKey="date" tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
-              <YAxis tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
-              <Tooltip content={<TT/>}/>
-              <ReferenceLine y={0} stroke="var(--border2)" strokeDasharray="3 3"/>
-              <Area type="monotone" dataKey="cum" stroke="#00e5a0" strokeWidth={2} fill="url(#g1)" dot={{fill:"#00e5a0",r:4}}/>
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-        <div className="fade-up-2" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"20px 20px 12px" }}>
-          <SectionTitle title="Daily P&L" />
-          <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={s.curve} margin={{top:4,right:4,bottom:0,left:-20}}>
-              <XAxis dataKey="date" tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
-              <YAxis tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
-              <Tooltip content={({active,payload})=>active&&payload?.length?<div style={{background:"var(--surface2)",border:"1px solid var(--border2)",borderRadius:8,padding:"8px 12px",fontFamily:"var(--font-mono)",fontSize:12,color:payload[0].value>=0?"var(--green)":"var(--red)",fontWeight:600}}>{fmt(payload[0].value,0)}</div>:null}/>
-              <ReferenceLine y={0} stroke="var(--border2)"/>
-              <Bar dataKey="day" radius={[4,4,0,0]}>
-                {s.curve.map((d,i)=><Cell key={i} fill={d.day>=0?"#00e5a0":"#ff4d6a"}/>)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* Bottom row */}
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 }}>
-        {/* By symbol */}
-        <div className="fade-up-3" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:20 }}>
-          <SectionTitle title="By Symbol"/>
-          {Object.entries(s.bySymbol).map(([sym,d])=>(
-            <div key={sym} style={{ marginBottom:14 }}>
-              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
-                <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:600 }}>{sym}</span>
-                <span style={{ fontFamily:"var(--font-mono)", fontSize:12, color:d.pnl>=0?"var(--green)":"var(--red)", fontWeight:600 }}>{fmt(d.pnl,0)}</span>
-              </div>
-              <div style={{ height:3, background:"var(--border)", borderRadius:2 }}>
-                <div style={{ height:"100%", width:`${d.wins/d.count*100}%`, background:d.pnl>=0?"var(--green)":"var(--red)", borderRadius:2 }}/>
-              </div>
-              <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", marginTop:4 }}>{d.count} trades · {Math.round(d.wins/d.count*100)}% WR</div>
-            </div>
-          ))}
+        <div style={{ display:"grid", gap:12 }}>
+          <div className="fade-up-2" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"20px 20px 12px" }}>
+            <SectionTitle title="Equity Curve" />
+            <ResponsiveContainer width="100%" height={180}>
+              <AreaChart data={s.curve} margin={{top:4,right:4,bottom:0,left:-20}}>
+                <defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#00e5a0" stopOpacity={0.2}/><stop offset="95%" stopColor="#00e5a0" stopOpacity={0}/></linearGradient></defs>
+                <XAxis dataKey="date" tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
+                <YAxis tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
+                <Tooltip content={<TT/>}/><ReferenceLine y={0} stroke="var(--border2)" strokeDasharray="3 3"/>
+                <Area type="monotone" dataKey="cum" stroke="#00e5a0" strokeWidth={2} fill="url(#g1)" dot={{fill:"#00e5a0",r:4}}/>
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="fade-up-3" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:20 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:16 }}><span aria-hidden="true" style={{ fontSize:12, lineHeight:1 }}>📅</span><div style={{ fontFamily:"var(--font-display)", fontSize:12, fontWeight:700, color:"var(--muted)", letterSpacing:"0.12em", textTransform:"uppercase" }}>Calendar</div></div>
+            <DashboardCalendar trades={trades} notes={notes} dayMeta={dayMeta} setDayMeta={setDayMeta} onSelectTrade={onSelectTrade} />
+          </div>
         </div>
 
-        {/* Top mistakes */}
-        <div className="fade-up-3" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:20 }}>
-          <SectionTitle title="Top Mistakes"/>
-          {s.topMistakes.length === 0 ? (
-            <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--dim)", paddingTop:8 }}>Tag mistakes in trade detail to see patterns</div>
-          ) : (
-            s.topMistakes.map(([mid, count])=>{
+        <div style={{ display:"grid", gap:12, alignContent:"start" }}>
+          <div className="fade-up-2" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"20px 20px 12px" }}>
+            <SectionTitle title="Daily P&L" />
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={s.curve} margin={{top:4,right:4,bottom:0,left:-20}}>
+                <XAxis dataKey="date" tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
+                <YAxis tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
+                <Tooltip content={({active,payload})=>active&&payload?.length?<div style={{background:"var(--surface2)",border:"1px solid var(--border2)",borderRadius:8,padding:"8px 12px",fontFamily:"var(--font-mono)",fontSize:12,color:payload[0].value>=0?"var(--green)":"var(--red)",fontWeight:600}}>{fmt(payload[0].value,0)}</div>:null}/>
+                <ReferenceLine y={0} stroke="var(--border2)"/>
+                <Bar dataKey="day" radius={[4,4,0,0]}>{s.curve.map((d,i)=><Cell key={i} fill={d.day>=0?"#00e5a0":"#ff4d6a"}/>)}</Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="fade-up-3" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:20 }}>
+            <SectionTitle title="By Symbol"/>
+            {Object.entries(s.bySymbol).map(([sym,d])=>(
+              <div key={sym} style={{ marginBottom:14 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}><span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:600 }}>{sym}</span><span style={{ fontFamily:"var(--font-mono)", fontSize:12, color:d.pnl>=0?"var(--green)":"var(--red)", fontWeight:600 }}>{fmt(d.pnl,0)}</span></div>
+                <div style={{ height:3, background:"var(--border)", borderRadius:2 }}><div style={{ height:"100%", width:`${d.wins/d.count*100}%`, background:d.pnl>=0?"var(--green)":"var(--red)", borderRadius:2 }}/></div>
+                <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", marginTop:4 }}>{d.count} trades · {Math.round(d.wins/d.count*100)}% WR</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="fade-up-3" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:20 }}>
+            <SectionTitle title="Top Mistakes"/>
+            {s.topMistakes.length === 0 ? <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--dim)", paddingTop:8 }}>Tag mistakes in trade detail to see patterns</div> : s.topMistakes.map(([mid, count])=>{
               const m = MISTAKE_OPTIONS.find(x=>x.id===mid);
               if (!m) return null;
               const maxCount = s.topMistakes[0][1];
               return (
                 <div key={mid} style={{ marginBottom:12 }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
-                    <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:m.color, fontWeight:600 }}>{m.label}</span>
-                    <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)" }}>{count}×</span>
-                  </div>
-                  <div style={{ height:3, background:"var(--border)", borderRadius:2 }}>
-                    <div style={{ height:"100%", width:`${count/maxCount*100}%`, background:m.color, borderRadius:2 }}/>
-                  </div>
+                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}><span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:m.color, fontWeight:600 }}>{m.label}</span><span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)" }}>{count}×</span></div>
+                  <div style={{ height:3, background:"var(--border)", borderRadius:2 }}><div style={{ height:"100%", width:`${count/maxCount*100}%`, background:m.color, borderRadius:2 }}/></div>
                 </div>
               );
-            })
-          )}
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+const toUnixSec = (date, time="00:00:00") => {
+  const safe = `${date}T${(time || "00:00:00").slice(0,8)}`;
+  return Math.floor(new Date(safe).getTime() / 1000);
+};
+
+const getTradeWindow = trade => {
+  const entrySec = toUnixSec(trade.date, trade.entryTime);
+  const hasExit = !!trade.exitTime;
+  const exitSec = hasExit ? toUnixSec(trade.date, trade.exitTime) : null;
+  return {
+    startSec: entrySec - 60 * 60,
+    endSec: hasExit ? exitSec + 60 * 60 : entrySec + 120 * 60,
+    entrySec,
+    exitSec,
+  };
+};
+
+async function fetchCandles({ symbol, startSec, endSec, timeframe="1m" }) {
+  const tf = timeframe === "5m" ? 300 : 60;
+  const candles = [];
+  let t = startSec - (startSec % tf);
+  let base = 100 + (symbol || "SYM").split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 50;
+  while (t <= endSec) {
+    const drift = Math.sin(t / 3600) * 0.4;
+    const open = base;
+    const close = open + drift + (Math.floor(t / tf) % 3 - 1) * 0.12;
+    const high = Math.max(open, close) + 0.35;
+    const low = Math.min(open, close) - 0.35;
+    candles.push({ time: t, open, high, low, close });
+    base = close;
+    t += tf;
+  }
+  return candles;
+}
+
+function TradeChart({ candles, entrySec, exitSec }) {
+  const hostRef = useRef(null);
+
+  useEffect(() => {
+    let chart;
+    let series;
+    let ro;
+    let canceled = false;
+
+    (async () => {
+      try {
+        const dep = "lightweight-charts";
+        const mod = await import(/* @vite-ignore */ dep);
+        if (canceled || !hostRef.current) return;
+        chart = mod.createChart(hostRef.current, {
+          layout: { background: { color: "#0e1419" }, textColor: "#8ea1bd" },
+          grid: { vertLines: { color: "#1e2d3d" }, horzLines: { color: "#1e2d3d" } },
+          rightPriceScale: { borderColor: "#243447" },
+          timeScale: { borderColor: "#243447", timeVisible: true, secondsVisible: false },
+          height: 280,
+        });
+        series = chart.addCandlestickSeries({
+          upColor: "#00e5a0", downColor: "#ff4d6a", borderVisible: false,
+          wickUpColor: "#00e5a0", wickDownColor: "#ff4d6a",
+        });
+        series.setData(candles);
+        const markers = [];
+        if (entrySec) markers.push({ time: entrySec, position: "belowBar", color: "#00e5a0", shape: "arrowUp", text: "Entry" });
+        if (exitSec) markers.push({ time: exitSec, position: "aboveBar", color: "#ff4d6a", shape: "arrowDown", text: "Exit" });
+        if (typeof series.setMarkers === "function") series.setMarkers(markers);
+        chart.timeScale().fitContent();
+        ro = new ResizeObserver(() => {
+          if (!hostRef.current || !chart) return;
+          chart.applyOptions({ width: hostRef.current.clientWidth });
+        });
+        ro.observe(hostRef.current);
+      } catch {
+        if (hostRef.current) hostRef.current.innerHTML = '<div style="color:#5a7a9a;padding:16px;font-family:monospace">Chart module unavailable. Add/install lightweight-charts to render candles.</div>';
+      }
+    })();
+
+    return () => {
+      canceled = true;
+      ro?.disconnect();
+      chart?.remove();
+    };
+  }, [candles, entrySec, exitSec]);
+
+  return <div ref={hostRef} style={{ width: "100%", minHeight: 280 }} aria-label="Trade chart" />;
+}
+
+function TradeDetailPage({ trades, selectedDayId, selectedTradeId, onBack, dayMeta, setDayMeta, notes, onUpdate, playbooks }) {
+  const [candles, setCandles] = useState([]);
+  const notesRef = useRef(null);
+  const fileRef = useRef(null);
+
+  const selectedTrade = trades.find(t => t.id === selectedTradeId) || null;
+  const dayId = selectedDayId || selectedTrade?.date;
+  const selectedMeta = dayMeta.find(d => d.date === dayId) || { date: dayId, notesHtml: "", image: "" };
+  const n = selectedTrade ? (notes[selectedTrade.id] || {}) : {};
+  const upd = (k, v) => selectedTrade && onUpdate(selectedTrade.id, k, v);
+
+  useEffect(() => {
+    if (notesRef.current) notesRef.current.innerHTML = selectedMeta.notesHtml || "";
+  }, [selectedMeta.notesHtml, dayId]);
+
+  const updateMeta = (date, updater) => {
+    if (!date) return;
+    setDayMeta(prev => {
+      const i = prev.findIndex(d=>d.date===date);
+      if (i === -1) return [...prev, updater({ date, notesHtml:"", image:"" })];
+      return prev.map((d, idx)=>idx===i ? updater(d) : d);
+    });
+  };
+
+  useEffect(() => {
+    if (!selectedTrade) return;
+    const { startSec, endSec } = getTradeWindow(selectedTrade);
+    fetchCandles({ symbol: selectedTrade.symbol, startSec, endSec, timeframe: "1m" }).then(setCandles);
+  }, [selectedTrade]);
+
+  if (!selectedTrade) return null;
+  const { entrySec, exitSec } = getTradeWindow(selectedTrade);
+  const rVal = calcR(selectedTrade.pnl, n.risk1R);
+
+  const applyFormat = cmd => {
+    notesRef.current?.focus();
+    document.execCommand(cmd, false);
+  };
+
+  const toggleMistake = (mid) => {
+    const current = n.mistakes || [];
+    const next = current.includes(mid) ? current.filter(x=>x!==mid) : [...current, mid];
+    upd("mistakes", next);
+  };
+
+  return (
+    <div>
+      <SectionTitle title="Trade Detail" action={<Btn onClick={onBack} variant="ghost">← Back to Day</Btn>} />
+
+      <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:16, marginBottom:12 }}>
+        <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700 }}>{selectedTrade.date} · {selectedTrade.symbol}</div>
+        <div style={{ marginTop:8, display:"flex", gap:14, flexWrap:"wrap", fontFamily:"var(--font-mono)", fontSize:12, color:"var(--muted)" }}>
+          <span>Side: <b style={{ color: sideColor(selectedTrade.side) }}>{selectedTrade.side}</b></span>
+          <span>Qty: {selectedTrade.contracts}</span>
+          <span>Entry: {selectedTrade.entryPrice} @ {selectedTrade.entryTime}</span>
+          <span>Exit: {selectedTrade.exitPrice} @ {selectedTrade.exitTime || "—"}</span>
+          <span>P&L: <b style={{ color: selectedTrade.pnl >= 0 ? "var(--green)" : "var(--red)" }}>{fmt(selectedTrade.pnl,1)}</b></span>
+        </div>
+      </div>
+
+      <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:16, marginBottom:12 }}>
+        <SectionTitle title="Chart" />
+        <TradeChart candles={candles} entrySec={entrySec} exitSec={exitSec} />
+      </div>
+
+      <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:16, marginBottom:12 }}>
+        <SectionTitle title="Journal (Day)" />
+        <div style={{ display:"flex", gap:8, marginBottom:8 }}>
+          {[ ["B","bold"], [<i key="i">I</i>,"italic"], [<u key="u">U</u>,"underline"], ["•","insertUnorderedList"], ["1.","insertOrderedList"] ].map(([label,cmd],i)=>(
+            <Btn key={i} onClick={()=>applyFormat(cmd)} style={{ padding:"6px 10px", minWidth:32 }}>{label}</Btn>
+          ))}
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 320px", gap:14, alignItems:"start" }}>
+          <div ref={notesRef} contentEditable suppressContentEditableWarning onInput={e=>updateMeta(dayId, d=>({ ...d, notesHtml:e.currentTarget.innerHTML==="<br>"?"":e.currentTarget.innerHTML }))} data-placeholder="Type your notes here..." className="journal-notes" style={{ minHeight:120, border:"1px solid var(--border)", borderRadius:8, padding:10 }} />
+
+          <div style={{ border:"1px solid var(--border)", borderRadius:8, padding:10 }}>
+            {!selectedMeta.image ? (
+              <button
+                type="button"
+                onClick={()=>fileRef.current?.click()}
+                style={{ background:"none", border:"none", color:"var(--blue)", textDecoration:"underline", padding:0, fontSize:12, fontFamily:"var(--font-mono)" }}
+              >
+                Add Image
+              </button>
+            ) : (
+              <>
+                <img src={selectedMeta.image} alt="Journal upload" style={{ width:"100%", borderRadius:8, border:"1px solid var(--border)", marginBottom:8 }} />
+                <div style={{ display:"flex", gap:8 }}>
+                  <button type="button" onClick={()=>fileRef.current?.click()} style={{ background:"none", border:"none", color:"var(--blue)", textDecoration:"underline", padding:0, fontSize:12, fontFamily:"var(--font-mono)" }}>Replace</button>
+                  <button type="button" onClick={()=>updateMeta(dayId, d=>({ ...d, image:"" }))} style={{ background:"none", border:"none", color:"var(--red)", textDecoration:"underline", padding:0, fontSize:12, fontFamily:"var(--font-mono)" }}>Remove</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+        <input ref={fileRef} type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>updateMeta(dayId,d=>({ ...d, image:String(ev.target.result) })); r.readAsDataURL(f); e.target.value=""; }} />
+      </div>
+
+      <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:16 }}>
+        <SectionTitle title="Trade Review Form" />
+
+        <div style={{ background:"var(--surface2)", border:"1px solid var(--border2)", borderRadius:9, padding:"14px 16px", marginBottom:16 }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+            <div>
+              <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:2 }}>R-MULTIPLE CALCULATOR</div>
+              <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--dim)" }}>R = P&L ÷ Initial Risk (1R)</div>
+            </div>
+            {rVal != null && <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:800, color:rColor(rVal) }}>{fmtR(rVal)}</div>}
+          </div>
+          <input type="number" min="0" step="0.5" value={n.risk1R||""} onChange={e=>upd("risk1R", e.target.value)} placeholder="My 1R risk in dollars" style={{ width:"100%", background:"var(--bg)", border:"1px solid var(--border)", borderRadius:7, padding:"9px 12px", fontSize:13, outline:"none" }} />
         </div>
 
-        {/* Grade breakdown */}
-        <div className="fade-up-3" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:20 }}>
-          <SectionTitle title="By Grade"/>
-          {Object.keys(s.gradeMap).length === 0
-            ? <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--dim)", paddingTop:8 }}>Grade trades in the detail panel to see breakdown</div>
-            : ["A","B","C","D","F"].filter(g=>s.gradeMap[g]).map(g=>(
-              <div key={g} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
-                <span style={{ fontFamily:"var(--font-mono)", fontSize:13, fontWeight:700, color:gradeColor(g), width:16 }}>{g}</span>
-                <div style={{ flex:1, height:3, background:"var(--border)", borderRadius:2 }}>
-                  <div style={{ height:"100%", width:`${s.gradeMap[g].count/s.tCount*100}%`, background:gradeColor(g), borderRadius:2 }}/>
-                </div>
-                <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", width:30, textAlign:"right" }}>{s.gradeMap[g].count}x</span>
-                <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:s.gradeMap[g].pnl>=0?"var(--green)":"var(--red)", width:56, textAlign:"right" }}>{fmt(s.gradeMap[g].pnl,0)}</span>
-              </div>
-            ))
-          }
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16 }}>
+          <div>
+            <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>GRADE</div>
+            <div style={{ display:"flex", gap:5 }}>{["A","B","C","D","F"].map(g=><button key={g} type="button" onClick={()=>upd("grade", n.grade===g?null:g)} style={{ flex:1, padding:"7px 0", border:`1px solid ${n.grade===g?gradeColor(g):"var(--border)"}`, borderRadius:6, background:n.grade===g?gradeColor(g)+"22":"transparent", color:n.grade===g?gradeColor(g):"var(--muted)", fontSize:13, fontWeight:700 }}>{g}</button>)}</div>
+          </div>
+          <div>
+            <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>RULE ADHERENCE</div>
+            <div style={{ display:"flex", gap:8 }}>{[{v:"Y",l:"✓ YES",c:"var(--green)"},{v:"N",l:"✗ NO",c:"var(--red)"}].map(o=><button key={o.v} type="button" onClick={()=>upd("rules", n.rules===o.v?null:o.v)} style={{ flex:1, padding:"7px 0", border:`1px solid ${n.rules===o.v?o.c:"var(--border)"}`, borderRadius:6, background:n.rules===o.v?o.c+"22":"transparent", color:n.rules===o.v?o.c:"var(--muted)", fontSize:12, fontWeight:700 }}>{o.l}</button>)}</div>
+          </div>
         </div>
+
+        <div style={{ marginBottom:16 }}>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:10 }}>MISTAKE TAGS</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:7 }}>
+            {MISTAKE_OPTIONS.map(m=>{
+              const active = (n.mistakes||[]).includes(m.id);
+              return <button key={m.id} type="button" onClick={()=>toggleMistake(m.id)} style={{ padding:"5px 12px", borderRadius:20, border:`1px solid ${active?m.color:"var(--border)"}`, background:active?m.color+"22":"transparent", color:active?m.color:"var(--muted)", fontSize:11 }}>{active?"✕ ":""}{m.label}</button>;
+            })}
+          </div>
+        </div>
+
+        {JOURNAL_FIELDS.map(f=> (
+          <div key={f.key} style={{ marginBottom:12 }}>
+            <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:6 }}>{f.label.toUpperCase()}</div>
+            {f.type === "input" || f.type === "datalist" ? (
+              <>
+                <input value={n[f.key]||""} onChange={e=>upd(f.key,e.target.value)} placeholder={f.ph} list={f.type==="datalist"?"pb-list-trade-detail":undefined} style={{ width:"100%", background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:7, padding:"9px 12px", fontSize:12, outline:"none" }} />
+                {f.type==="datalist" && <datalist id="pb-list-trade-detail">{playbooks.map(p=><option key={p.id} value={p.name}/>)}</datalist>}
+              </>
+            ) : (
+              <textarea value={n[f.key]||""} onChange={e=>upd(f.key,e.target.value)} placeholder={f.ph} rows={f.key==="marketContext"||f.key==="didWell"||f.key==="improve"?3:2} style={{ width:"100%", background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:7, padding:"9px 12px", fontSize:12, resize:"vertical", lineHeight:1.6, outline:"none" }} />
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -758,62 +918,65 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport }) {
 }
 
 // ─── CALENDAR ─────────────────────────────────────────────────────────────────
-function Calendar({ trades, notes }) {
-  const [month,    setMonth]    = useState(new Date().getMonth()+1);
-  const [year,     setYear]     = useState(new Date().getFullYear());
-  const [selDay,   setSelDay]   = useState(null);
-  const [dayNotes, setDayNotes] = useState({});
+function DashboardCalendar({ trades, notes, dayMeta, setDayMeta, onSelectTrade }) {
+  const [month, setMonth] = useState(new Date().getMonth()+1);
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [selDay, setSelDay] = useState(null);
 
-  const byDate = useMemo(()=>{
-    const m={};
-    trades.forEach(t=>{
-      if(!m[t.date]) m[t.date]={pnl:0,trades:[],wins:0};
-      m[t.date].pnl+=t.pnl; m[t.date].trades.push(t); if(t.win) m[t.date].wins++;
+  const byDate = useMemo(() => {
+    const m = {};
+    trades.forEach(t => {
+      if(!m[t.date]) m[t.date] = { pnl:0, trades:[], wins:0 };
+      m[t.date].pnl += t.pnl;
+      m[t.date].trades.push(t);
+      if (t.win) m[t.date].wins++;
     });
     return m;
-  },[trades]);
+  }, [trades]);
 
-  const dim    = new Date(year, month, 0).getDate();
-  const first  = new Date(year, month-1, 1).getDay();
+  const updateMeta = (date, updater) => {
+    if (!date) return;
+    setDayMeta(prev => {
+      const i = prev.findIndex(d=>d.date===date);
+      if (i === -1) return [...prev, updater({ date, notesHtml:"", image:"" })];
+      return prev.map((d, idx)=>idx===i ? updater(d) : d);
+    });
+  };
+
+  const toPlain = (html="") => html.replace(/<br\s*\/?>(\n)?/g, "\n").replace(/<[^>]+>/g, "");
+  const toHtml = (txt="") => txt.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\n/g,"<br>");
+
+  const dim = new Date(year, month, 0).getDate();
+  const first = new Date(year, month-1, 1).getDay();
   const maxAbs = Math.max(...Object.values(byDate).map(d=>Math.abs(d.pnl)),1);
   const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-
-  const selKey  = selDay ? `${year}-${String(month).padStart(2,"0")}-${String(selDay).padStart(2,"0")}` : null;
+  const selKey = selDay ? `${year}-${String(month).padStart(2,"0")}-${String(selDay).padStart(2,"0")}` : null;
   const selData = selKey ? byDate[selKey] : null;
+  const selectedMeta = dayMeta.find(d=>d.date===selKey);
 
   return (
-    <div style={{ display:"grid", gridTemplateColumns:"1fr 340px", gap:24 }}>
+    <div style={{ display:"grid", gridTemplateColumns:"1fr 320px", gap:16 }}>
       <div>
-        <div style={{ display:"flex", alignItems:"center", gap:16, marginBottom:20 }}>
-          <button onClick={()=>{if(month===1){setMonth(12);setYear(y=>y-1);}else setMonth(m=>m-1);}} style={{ background:"none", border:"none", color:"var(--muted)", fontSize:20 }}>‹</button>
-          <div style={{ fontFamily:"var(--font-display)", fontSize:20, fontWeight:700, minWidth:160, textAlign:"center" }}>{MONTHS[month-1]} {year}</div>
-          <button onClick={()=>{if(month===12){setMonth(1);setYear(y=>y+1);}else setMonth(m=>m+1);}} style={{ background:"none", border:"none", color:"var(--muted)", fontSize:20 }}>›</button>
+        <div style={{ display:"flex", alignItems:"center", gap:16, marginBottom:14 }}>
+          <button type="button" onClick={()=>{if(month===1){setMonth(12);setYear(y=>y-1);}else setMonth(m=>m-1);}} style={{ background:"none", border:"none", color:"var(--muted)", fontSize:18 }}>‹</button>
+          <div style={{ fontFamily:"var(--font-display)", fontSize:18, fontWeight:700, minWidth:150, textAlign:"center" }}>{MONTHS[month-1]} {year}</div>
+          <button type="button" onClick={()=>{if(month===12){setMonth(1);setYear(y=>y+1);}else setMonth(m=>m+1);}} style={{ background:"none", border:"none", color:"var(--muted)", fontSize:18 }}>›</button>
         </div>
         <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:5, marginBottom:5 }}>
-          {["SUN","MON","TUE","WED","THU","FRI","SAT"].map(d=>(
-            <div key={d} style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", textAlign:"center", padding:"4px 0", letterSpacing:"0.08em" }}>{d}</div>
-          ))}
+          {["SUN","MON","TUE","WED","THU","FRI","SAT"].map(d=><div key={d} style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", textAlign:"center", padding:"4px 0", letterSpacing:"0.08em" }}>{d}</div>)}
         </div>
         <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:5 }}>
-          {Array(first).fill(null).map((_,i)=><div key={"e"+i}/>)}
+          {Array(first).fill(null).map((_,i)=><div key={"e"+i}/>) }
           {Array(dim).fill(null).map((_,i)=>{
-            const day=i+1;
-            const dateKey=`${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
-            const d=byDate[dateKey];
-            const sel=selDay===day;
-            const intensity=d?Math.min(Math.abs(d.pnl)/maxAbs,1):0;
-            const weekend=((first+i)%7===0)||((first+i)%7===6);
-            const dayUnreviewed = d ? d.trades.filter(t=>!isReviewed(notes[t.id])).length : 0;
+            const day = i+1;
+            const dateKey = `${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+            const d = byDate[dateKey];
+            const sel = selDay===day;
+            const intensity = d ? Math.min(Math.abs(d.pnl)/maxAbs,1) : 0;
             return (
-              <div key={day} onClick={()=>d&&setSelDay(day===selDay?null:day)} style={{ aspectRatio:"1", borderRadius:8, padding:6, border:`1px solid ${sel?"var(--blue)":d?"var(--border2)":"var(--border)"}`, background:d?(d.pnl>=0?`rgba(0,229,160,${intensity*0.3})`:`rgba(255,77,106,${intensity*0.3})`):weekend?"transparent":"var(--surface)", cursor:d?"pointer":"default", display:"flex", flexDirection:"column", justifyContent:"space-between", transition:"all 0.15s", opacity:weekend&&!d?0.3:1, position:"relative" }}>
+              <div key={day} onClick={()=>d&&setSelDay(day===selDay?null:day)} style={{ aspectRatio:"1", borderRadius:8, padding:6, border:`1px solid ${sel?"var(--blue)":d?"var(--border2)":"var(--border)"}`, background:d?(d.pnl>=0?`rgba(0,229,160,${intensity*0.25})`:`rgba(255,77,106,${intensity*0.25})`):"var(--surface)", cursor:d?"pointer":"default", display:"flex", flexDirection:"column", justifyContent:"space-between" }}>
                 <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:d?"var(--text)":"var(--dim)" }}>{day}</div>
-                {d&&<>
-                  <div style={{ fontFamily:"var(--font-mono)", fontSize:10, fontWeight:700, color:d.pnl>=0?"var(--green)":"var(--red)", lineHeight:1 }}>{d.pnl>=0?"+":""}{Math.round(d.pnl)}</div>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                    <span style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)" }}>{d.trades.length}T</span>
-                    {dayUnreviewed>0&&<span style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--gold)" }}>○{dayUnreviewed}</span>}
-                  </div>
-                </>}
+                {d && <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:d.pnl>=0?"var(--green)":"var(--red)", fontWeight:700 }}>{d.pnl>=0?"+":""}{Math.round(d.pnl)}</div>}
               </div>
             );
           })}
@@ -821,47 +984,26 @@ function Calendar({ trades, notes }) {
       </div>
 
       <div>
-        {selKey&&selData ? (
+        {selKey && selData ? (
           <div className="fade-up">
-            <div style={{ fontFamily:"var(--font-display)", fontSize:16, fontWeight:700, marginBottom:16 }}>{selKey}</div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:16 }}>
-              <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:8, padding:12 }}>
-                <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", marginBottom:4 }}>NET P&L</div>
-                <div style={{ fontFamily:"var(--font-display)", fontSize:22, fontWeight:700, color:selData.pnl>=0?"var(--green)":"var(--red)" }}>{selData.pnl>=0?"+":""}{Math.round(selData.pnl)}</div>
-              </div>
-              <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:8, padding:12 }}>
-                <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", marginBottom:4 }}>WIN RATE</div>
-                <div style={{ fontFamily:"var(--font-display)", fontSize:22, fontWeight:700, color:"var(--blue)" }}>{Math.round(selData.wins/selData.trades.length*100)}%</div>
-              </div>
-            </div>
-            {selData.trades.map(t=>{
-              const rVal = calcR(t.pnl, notes[t.id]?.risk1R);
-              const rev  = isReviewed(notes[t.id]);
-              return (
-                <div key={t.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 12px", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:7, marginBottom:6 }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                    <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)" }}>{t.entryTime}</span>
-                    <Chip color={sideColor(t.side)}>{t.side}</Chip>
-                    <span style={{ fontFamily:"var(--font-mono)", fontSize:11 }}>{t.symbol}</span>
-                  </div>
-                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                    {rVal!=null&&<span style={{ fontFamily:"var(--font-mono)", fontSize:11, fontWeight:700, color:rColor(rVal) }}>{fmtR(rVal)}</span>}
-                    <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:700, color:t.pnl>=0?"var(--green)":"var(--red)" }}>{fmt(t.pnl,1)}</span>
-                    <span style={{ fontFamily:"var(--font-mono)", fontSize:9, color:rev?"var(--green)":"var(--gold)" }}>{rev?"✓":"○"}</span>
-                  </div>
+            <div style={{ fontFamily:"var(--font-display)", fontSize:16, fontWeight:700, marginBottom:10 }}>{selKey}</div>
+            {selData.trades.map(t=>(
+              <div key={t.id} onClick={()=>onSelectTrade?.(t)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 10px", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:7, marginBottom:6, cursor:"pointer" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)" }}>{t.entryTime}</span>
+                  <Chip color={sideColor(t.side)}>{t.side}</Chip>
+                  <span style={{ fontFamily:"var(--font-mono)", fontSize:11 }}>{t.symbol}</span>
                 </div>
-              );
-            })}
-            <div style={{ marginTop:14 }}>
+                <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:700, color:t.pnl>=0?"var(--green)":"var(--red)" }}>{fmt(t.pnl,1)}</span>
+              </div>
+            ))}
+            <div style={{ marginTop:12 }}>
               <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>DAILY REVIEW</div>
-              <textarea value={dayNotes[selKey]||""} onChange={e=>setDayNotes(p=>({...p,[selKey]:e.target.value}))} placeholder="Overall read, how you felt, themes that worked, what to carry forward…" rows={5} style={{ width:"100%", background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:8, padding:"10px 12px", fontSize:12, resize:"vertical", lineHeight:1.7, outline:"none" }} onFocus={e=>e.target.style.borderColor="var(--blue)"} onBlur={e=>e.target.style.borderColor="var(--border)"} />
+              <textarea value={toPlain(selectedMeta?.notesHtml||"")} onChange={e=>updateMeta(selKey, d=>({ ...d, notesHtml: toHtml(e.target.value) }))} placeholder="Overall read, how you felt, themes that worked, what to carry forward…" rows={5} style={{ width:"100%", background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:8, padding:"10px 12px", fontSize:12, resize:"vertical", lineHeight:1.7, outline:"none" }} />
             </div>
           </div>
         ) : (
-          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", height:300, gap:10, color:"var(--dim)" }}>
-            <div style={{ fontSize:40 }}>📅</div>
-            <div style={{ fontFamily:"var(--font-mono)", fontSize:12 }}>Click a trading day to review</div>
-          </div>
+          <div style={{ height:280 }} />
         )}
       </div>
     </div>
@@ -956,12 +1098,240 @@ function Playbook({ trades, notes, playbooks, setPlaybooks }) {
   );
 }
 
+// ─── JOURNAL PAGE ────────────────────────────────────────────────────────────
+const JOURNAL_STORAGE_KEY = "ej_journal_days";
+
+const toJournalDate = d => new Date(`${d}T00:00:00`);
+const fmtJournalDate = d => toJournalDate(d).toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric" });
+
+function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayMeta, setDayMeta }) {
+  const [selectedDayId, setSelectedDayId] = useState("");
+  const [editingTrade, setEditingTrade] = useState(null);
+  const [collapsed, setCollapsed] = useState(false);
+  const notesRef = useRef(null);
+  const fileRef = useRef(null);
+
+  const dayMetaMap = useMemo(() => new Map(dayMeta.map(d=>[d.date,d])), [dayMeta]);
+  const dayList = useMemo(() => {
+    const dates = new Set(trades.map(t=>t.date));
+    dayMeta.forEach(d=>dates.add(d.date));
+    return [...dates].sort((a,b)=>toJournalDate(b)-toJournalDate(a));
+  }, [trades, dayMeta]);
+
+  useEffect(() => {
+    if (!selectedDayId && dayList.length) setSelectedDayId(dayList[0]);
+    if (selectedDayId && !dayList.includes(selectedDayId)) setSelectedDayId(dayList[0] || "");
+  }, [dayList, selectedDayId]);
+
+
+  const selectedDate = selectedDayId || dayList[0];
+  const selectedTrades = useMemo(() => trades.filter(t=>t.date===selectedDate), [trades, selectedDate]);
+  const selectedMeta = dayMetaMap.get(selectedDate) || { date:selectedDate, notesHtml:"", image:"" };
+
+  useEffect(() => {
+    if (notesRef.current) notesRef.current.innerHTML = selectedMeta.notesHtml || "";
+  }, [selectedMeta.notesHtml, selectedDate]);
+
+  const updateMeta = (date, updater) => {
+    if (!date) return;
+    setDayMeta(prev => {
+      const i = prev.findIndex(d=>d.date===date);
+      if (i === -1) return [...prev, updater({ date, notesHtml:"", image:"" })];
+      return prev.map((d, idx)=>idx===i ? updater(d) : d);
+    });
+  };
+
+  const applyFormat = cmd => {
+    notesRef.current?.focus();
+    document.execCommand(cmd, false);
+  };
+
+  const onImageUpload = file => {
+    if (!file || !selectedDate) return;
+    const reader = new FileReader();
+    reader.onload = e => updateMeta(selectedDate, d => ({ ...d, image: String(e.target.result) }));
+    reader.readAsDataURL(file);
+  };
+
+  const dayStats = day => {
+    const dayTrades = trades.filter(t=>t.date===day);
+    const net = dayTrades.reduce((a,t)=>a+Number(t.pnl||0),0);
+    const wins = dayTrades.filter(t=>Number(t.pnl)>0);
+    const losses = dayTrades.filter(t=>Number(t.pnl)<0);
+    const grossWin = wins.reduce((a,t)=>a+Number(t.pnl||0),0);
+    const grossLoss = Math.abs(losses.reduce((a,t)=>a+Number(t.pnl||0),0));
+    return {
+      net,
+      trades: dayTrades.length,
+      avgWin: wins.length ? grossWin / wins.length : 0,
+      avgLoss: losses.length ? losses.reduce((a,t)=>a+Number(t.pnl||0),0) / losses.length : 0,
+      winRate: dayTrades.length ? (wins.length / dayTrades.length) * 100 : 0,
+      pf: grossLoss > 0 ? grossWin / grossLoss : (grossWin > 0 ? grossWin : 0),
+    };
+  };
+
+  const makeDraftFromTrade = t => ({
+    id: t.id,
+    time: t.entryTime?.slice(0,5) || "",
+    symbol: t.symbol || "",
+    side: t.side || "LONG",
+    qty: t.contracts || 1,
+    entry: t.entryPrice ?? "",
+    exit: t.exitPrice ?? "",
+    pnl: t.pnl ?? "",
+  });
+
+  if (!selectedDate) {
+    return <div style={{ color:"var(--muted)", fontFamily:"var(--font-mono)" }}>No trading days available yet.</div>;
+  }
+
+  return (
+    <div style={{ display:"grid", gridTemplateColumns: collapsed?"56px 1fr":"420px 1fr", height:"calc(100vh - 146px)", border:"1px solid var(--border)", borderRadius:10, overflow:"hidden", background:"var(--surface)" }}>
+      <div style={{ borderRight:"1px solid var(--border)", background:"var(--surface)", overflowY:"auto" }}>
+        <div style={{ padding:"10px", borderBottom:"1px solid var(--border)", display:"flex", justifyContent: collapsed?"center":"space-between", alignItems:"center" }}>
+          {!collapsed && <div style={{ fontFamily:"var(--font-display)", fontSize:13, color:"var(--muted)", textTransform:"uppercase", letterSpacing:"0.08em" }}>Daily Summary</div>}
+          <Btn onClick={()=>setCollapsed(v=>!v)} style={{ padding:"4px 8px" }} aria-label={collapsed?"Expand daily summary":"Collapse daily summary"}>{collapsed?"»":"«"}</Btn>
+        </div>
+
+        {!collapsed && dayList.map(day => {
+          const s = dayStats(day);
+          const selectedCard = day===selectedDate;
+          return (
+            <button
+              key={day}
+              onClick={()=>setSelectedDayId(day)}
+              type="button"
+              style={{ width:"100%", textAlign:"left", background:selectedCard?"var(--surface3)":"var(--surface)", border:"none", borderBottom:"1px solid var(--border)", padding:"14px", color:"var(--text)" }}
+              aria-pressed={selectedCard}
+            >
+              <div style={{ fontFamily:"var(--font-mono)", fontSize:12, color:"var(--muted)", marginBottom:8 }}>{fmtJournalDate(day)}</div>
+              <div style={{ fontFamily:"var(--font-display)", fontSize:38, fontWeight:700, color:s.net>=0?"var(--green)":"var(--red)", marginBottom:8 }}>{fmt(s.net,2)}</div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"4px 10px", fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)" }}>
+                <span>Avg Win <b style={{ color:"var(--green)", marginLeft:4 }}>{fmt(s.avgWin,2)}</b></span>
+                <span>Avg Loss <b style={{ color:"var(--red)", marginLeft:4 }}>{fmt(s.avgLoss,2)}</b></span>
+                <span>Win % <b style={{ color:"var(--text)", marginLeft:4 }}>{s.winRate.toFixed(1)}%</b></span>
+                <span>PF <b style={{ color:"var(--text)", marginLeft:4 }}>{s.pf.toFixed(2)}</b></span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{ padding:0, background:"var(--bg)", overflowY:"auto" }}>
+        <div style={{ borderBottom:"1px solid var(--border)", padding:"8px 14px", display:"flex", gap:8 }}>
+          {[["B","bold","Bold"],[<i key="i">I</i>,"italic","Italic"],[<u key="u">U</u>,"underline","Underline"],["•","insertUnorderedList","Bulleted list"],["1.","insertOrderedList","Numbered list"]].map(([label, cmd, aria], i)=>(
+            <Btn key={i} onClick={()=>applyFormat(cmd)} style={{ padding:"6px 10px", minWidth:32 }} aria-label={aria}>{label}</Btn>
+          ))}
+        </div>
+
+        <div style={{ padding:"16px" }}>
+          <div style={{ fontFamily:"var(--font-display)", fontSize:42, fontWeight:700, marginBottom:10 }}>{toJournalDate(selectedDate).toLocaleDateString("en-US", { month:"long", day:"numeric", year:"numeric" })}</div>
+          <div
+            ref={notesRef}
+            contentEditable
+            suppressContentEditableWarning
+            onInput={e=>updateMeta(selectedDate, d=>({ ...d, notesHtml:e.currentTarget.innerHTML==="<br>"?"":e.currentTarget.innerHTML }))}
+            data-placeholder="Type your notes here..."
+            style={{ minHeight:180, outline:"none", color:"var(--text)", fontFamily:"var(--font-mono)", fontSize:14, borderBottom:"1px solid var(--border)", paddingBottom:18 }}
+            className="journal-notes"
+            aria-label="Journal notes"
+          />
+
+          <div style={{ paddingTop:16, marginTop:16 }}>
+            <div style={{ marginBottom:10, fontFamily:"var(--font-display)", fontSize:16 }}>Image</div>
+            {!selectedMeta.image ? (
+              <button type="button" onClick={()=>fileRef.current?.click()} style={{ width:140, height:140, border:"1px dashed var(--border2)", background:"transparent", color:"var(--muted)", fontFamily:"var(--font-mono)" }}>ADD IMAGE</button>
+            ) : (
+              <div>
+                <img src={selectedMeta.image} alt="Journal upload" style={{ maxWidth:360, borderRadius:8, border:"1px solid var(--border)" }} />
+                <div style={{ marginTop:8, display:"flex", gap:8 }}>
+                  <Btn onClick={()=>fileRef.current?.click()}>Replace</Btn>
+                  <Btn onClick={()=>updateMeta(selectedDate, d=>({ ...d, image:"" }))} variant="ghost">Remove</Btn>
+                </div>
+              </div>
+            )}
+            <input ref={fileRef} type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{onImageUpload(e.target.files?.[0]); e.target.value="";}} />
+          </div>
+
+          <div style={{ marginTop:20 }}>
+            <SectionTitle title="Trades" action={<Btn onClick={()=>setEditingTrade({ id:`jr_manual_${Date.now()}`, time:"", symbol:"", side:"LONG", qty:1, entry:"", exit:"", pnl:"" })}>+ Add Trade</Btn>} />
+            {!selectedTrades.length ? (
+              <div style={{ border:"1px dashed var(--border2)", borderRadius:8, padding:16, color:"var(--muted)", fontFamily:"var(--font-mono)", fontSize:12 }}>No trades logged for this day yet.</div>
+            ) : (
+              <div style={{ border:"1px solid var(--border)", borderRadius:8, overflow:"hidden" }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontFamily:"var(--font-mono)", fontSize:12 }}>
+                  <thead>
+                    <tr style={{ background:"var(--surface)" }}>
+                      {["Time","Symbol","Side","Qty","Entry","Exit","P&L","Actions"].map(h=><th key={h} style={{ textAlign:"left", padding:"10px", borderBottom:"1px solid var(--border)" }}>{h}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedTrades.map(t=>(
+                      <tr key={t.id} className="hover-row" onClick={()=>onSelectTrade(t)} style={{ cursor:"pointer" }}>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.entryTime?.slice(0,5)}</td>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.symbol}</td>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.side}</td>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.contracts}</td>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.entryPrice}</td>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.exitPrice}</td>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)", color:t.pnl>=0?"var(--green)":"var(--red)", fontWeight:700 }}>{fmt(t.pnl,2)}</td>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>
+                          <button type="button" onClick={(e)=>{e.stopPropagation(); setEditingTrade(makeDraftFromTrade(t));}} style={{ background:"transparent", border:"none", color:"var(--blue)", marginRight:8 }}>Edit</button>
+                          <button type="button" onClick={(e)=>{e.stopPropagation(); onDeleteTrade(t.id);}} style={{ background:"transparent", border:"none", color:"var(--red)" }}>Delete</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {editingTrade && (
+              <div style={{ marginTop:12, border:"1px solid var(--border)", borderRadius:8, padding:12, display:"grid", gridTemplateColumns:"repeat(7,minmax(0,1fr))", gap:8 }}>
+                {[["time","Time"],["symbol","Symbol"],["side","Side"],["qty","Qty"],["entry","Entry"],["exit","Exit"],["pnl","P&L"]].map(([k,l])=>(
+                  <label key={k} style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", display:"flex", flexDirection:"column", gap:4 }}>
+                    {l}
+                    <input value={editingTrade[k]} onChange={e=>setEditingTrade(p=>({...p,[k]:e.target.value}))} style={{ background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:6, padding:"8px", fontSize:12 }} />
+                  </label>
+                ))}
+                <div style={{ gridColumn:"1 / -1", display:"flex", gap:8 }}>
+                  <Btn onClick={()=>{
+                    const pnl = Number(editingTrade.pnl||0);
+                    const trade = {
+                      id: editingTrade.id,
+                      date: selectedDate,
+                      symbol: editingTrade.symbol,
+                      side: editingTrade.side || "LONG",
+                      contracts: Number(editingTrade.qty||1),
+                      entryTime: `${editingTrade.time || "00:00"}:00`,
+                      exitTime: `${editingTrade.time || "00:00"}:00`,
+                      entryPrice: Number(editingTrade.entry||0),
+                      exitPrice: Number(editingTrade.exit||0),
+                      pnl,
+                      ticks: 0,
+                      duration: "—",
+                      win: pnl > 0,
+                    };
+                    onUpsertTrade(trade);
+                    setEditingTrade(null);
+                  }} variant="primary">Save Trade</Btn>
+                  <Btn onClick={()=>setEditingTrade(null)} variant="ghost">Cancel</Btn>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── APP ROOT ─────────────────────────────────────────────────────────────────
 const NAV_ITEMS = [
   { id:"dashboard", icon:"◈", label:"Dashboard" },
   { id:"trades",    icon:"≡", label:"Trade Log"  },
-  { id:"calendar",  icon:"▦", label:"Calendar"   },
   { id:"playbook",  icon:"◆", label:"Playbook"   },
+  { id:"journal",   icon:"✎", label:"Journal"    },
 ];
 
 export default function App() {
@@ -970,6 +1340,27 @@ export default function App() {
   const [notes,     setNotes]     = useState({});
   const [playbooks, setPlaybooks] = useState(DEMO_PLAYBOOKS);
   const [selTrade,  setSelTrade]  = useState(null);
+  const [selectedDayId, setSelectedDayId] = useState("");
+  const [selectedTradeId, setSelectedTradeId] = useState("");
+  const [viewMode, setViewMode] = useState("DAY");
+  const [journalDays, setJournalDays] = useState(() => {
+    try {
+      const saved = localStorage.getItem(JOURNAL_STORAGE_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(()=>{
+    try {
+      localStorage.setItem(JOURNAL_STORAGE_KEY, JSON.stringify(journalDays));
+    } catch(e) {}
+  }, [journalDays]);
+
+  useEffect(()=>{
+    if (page !== "trades") setViewMode("DAY");
+  }, [page]);
 
   useEffect(()=>{
     try {
@@ -999,6 +1390,29 @@ export default function App() {
       const existing = new Set(prev.map(t=>t.id));
       return [...prev, ...incoming.filter(t=>!existing.has(t.id))];
     });
+  },[]);
+
+  const openTradeDetail = useCallback((trade)=>{
+    setSelectedDayId(trade.date);
+    setSelectedTradeId(trade.id);
+    setViewMode("TRADE_DETAIL");
+  },[]);
+
+  const upsertTrade = useCallback((trade)=>{
+    setTrades(prev=>{
+      const exists = prev.some(t=>t.id===trade.id);
+      return exists ? prev.map(t=>t.id===trade.id?{...t,...trade}:t) : [...prev, trade];
+    });
+  },[]);
+
+  const deleteTrade = useCallback((tradeId)=>{
+    setTrades(prev=>prev.filter(t=>t.id!==tradeId));
+    setNotes(prev=>{
+      const next = { ...prev };
+      delete next[tradeId];
+      return next;
+    });
+    setSelTrade(prev=>prev?.id===tradeId?null:prev);
   },[]);
 
   const idx      = selTrade ? trades.indexOf(selTrade) : -1;
@@ -1055,10 +1469,10 @@ export default function App() {
         </div>
 
         <div style={{ flex:1, overflowY:"auto", padding:"24px 28px" }}>
-          {page==="dashboard" && <Dashboard  trades={trades} notes={notes}/>}
-          {page==="trades"    && <TradeLog   trades={trades} notes={notes} playbooks={playbooks} onSelect={setSelTrade} onImport={importTrades}/>}
-          {page==="calendar"  && <Calendar   trades={trades} notes={notes}/>}
-          {page==="playbook"  && <Playbook   trades={trades} notes={notes} playbooks={playbooks} setPlaybooks={setPlaybooks}/>}
+          {page==="dashboard" && <Dashboard trades={trades} notes={notes} dayMeta={journalDays} setDayMeta={setJournalDays} onSelectTrade={setSelTrade}/>} 
+          {page==="trades"    && (viewMode==="TRADE_DETAIL" ? <TradeDetailPage trades={trades} selectedDayId={selectedDayId} selectedTradeId={selectedTradeId} onBack={()=>setViewMode("DAY")} dayMeta={journalDays} setDayMeta={setJournalDays} notes={notes} onUpdate={updateNote} playbooks={playbooks} /> : <TradeLog trades={trades} notes={notes} playbooks={playbooks} onSelect={openTradeDetail} onImport={importTrades}/>)} 
+          {page==="playbook"  && <Playbook   trades={trades} notes={notes} playbooks={playbooks} setPlaybooks={setPlaybooks}/>} 
+          {page==="journal"   && <JournalPage trades={trades} onSelectTrade={setSelTrade} onUpsertTrade={upsertTrade} onDeleteTrade={deleteTrade} dayMeta={journalDays} setDayMeta={setJournalDays}/>} 
         </div>
       </div>
 
