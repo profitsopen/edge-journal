@@ -663,22 +663,6 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport }) {
     );
   });
 
-  const metrics = useMemo(() => {
-    if (!filtered.length) {
-      return { accountReturn:0, avgReturn:0, winRate:0, profitFactor:0 };
-    }
-    const wins = filtered.filter(t=>t.pnl > 0);
-    const losses = filtered.filter(t=>t.pnl < 0);
-    const grossProfit = wins.reduce((a,t)=>a+t.pnl,0);
-    const grossLoss = Math.abs(losses.reduce((a,t)=>a+t.pnl,0));
-    const accountReturn = filtered.reduce((a,t)=>a+t.pnl,0);
-    const avgReturn = accountReturn / filtered.length;
-    const winRate = wins.length / filtered.length;
-    const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0;
-
-    return { accountReturn, avgReturn, winRate, profitFactor };
-  },[filtered]);
-
   const unreviewedCount = trades.filter(t=>!isReviewed(notes[t.id])).length;
 
   return (
@@ -716,10 +700,8 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport }) {
         </select>
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"minmax(0,1fr) 240px", gap:12, alignItems:"start" }}>
-        <div>
-          {/* Table */}
-          <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, overflow:"hidden" }}>
+      {/* Table */}
+      <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, overflow:"hidden" }}>
         <div style={{ display:"grid", gridTemplateColumns:"80px 90px 64px 50px 90px 90px 86px 86px 100px 56px 60px 60px 54px", padding:"10px 16px", borderBottom:"1px solid var(--border)", gap:0 }}>
           {["DATE","SYMBOL","SIDE","QTY","ENTRY TIME","EXIT TIME","ENTRY $","EXIT $","P&L","R-MULT","STATUS","NOTES","GRADE"].map(h=>(
             <div key={h} style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.08em", fontWeight:700 }}>{h}</div>
@@ -760,48 +742,16 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport }) {
             </div>
           );
         })}
-          </div>
+      </div>
 
-          <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:10, paddingLeft:4 }}>
-            {filtered.length} trades · Net:{" "}
-            <span style={{ color:filtered.reduce((a,t)=>a+t.pnl,0)>=0?"var(--green)":"var(--red)", fontWeight:600 }}>
-              {fmt(filtered.reduce((a,t)=>a+t.pnl,0),1)}
-            </span>
-            {fReviewed==="unreviewed" && unreviewedCount>0 && (
-              <span style={{ color:"var(--gold)", marginLeft:16 }}>⚠ {unreviewedCount} trades need review</span>
-            )}
-          </div>
-        </div>
-
-        <div style={{ display:"grid", gap:10 }}>
-          {[
-            {
-              label:"ACCOUNT RETURN",
-              value:fmt(metrics.accountReturn,1),
-              color:metrics.accountReturn >= 0 ? "var(--green)" : "var(--red)",
-            },
-            {
-              label:"PROFIT FACTOR",
-              value:Number.isFinite(metrics.profitFactor) ? metrics.profitFactor.toFixed(2) : "∞",
-              color:metrics.profitFactor >= 1 || !Number.isFinite(metrics.profitFactor) ? "var(--green)" : "var(--red)",
-            },
-            {
-              label:"AVERAGE RETURN",
-              value:fmt(metrics.avgReturn,1),
-              color:metrics.avgReturn >= 0 ? "var(--green)" : "var(--red)",
-            },
-            {
-              label:"WIN %",
-              value:`${Math.round(metrics.winRate*100)}%`,
-              color:metrics.winRate >= 0.5 ? "var(--green)" : "var(--red)",
-            },
-          ].map(card=>(
-            <div key={card.label} style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:8, padding:"12px 14px" }}>
-              <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.08em", marginBottom:6 }}>{card.label}</div>
-              <div style={{ fontFamily:"var(--font-display)", fontSize:22, fontWeight:700, color:card.color, lineHeight:1 }}>{card.value}</div>
-            </div>
-          ))}
-        </div>
+      <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:10, paddingLeft:4 }}>
+        {filtered.length} trades · Net:{" "}
+        <span style={{ color:filtered.reduce((a,t)=>a+t.pnl,0)>=0?"var(--green)":"var(--red)", fontWeight:600 }}>
+          {fmt(filtered.reduce((a,t)=>a+t.pnl,0),1)}
+        </span>
+        {fReviewed==="unreviewed" && unreviewedCount>0 && (
+          <span style={{ color:"var(--gold)", marginLeft:16 }}>⚠ {unreviewedCount} trades need review</span>
+        )}
       </div>
     </div>
   );
