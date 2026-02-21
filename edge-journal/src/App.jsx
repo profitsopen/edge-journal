@@ -514,7 +514,7 @@ function Dashboard({ trades, notes, dayMeta, setDayMeta, onSelectTrade }) {
             </ResponsiveContainer>
           </div>
           <div className="fade-up-3" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:20 }}>
-            <SectionTitle title="Calendar"/>
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:16 }}><span aria-hidden="true" style={{ fontSize:12, lineHeight:1 }}>📅</span><div style={{ fontFamily:"var(--font-display)", fontSize:12, fontWeight:700, color:"var(--muted)", letterSpacing:"0.12em", textTransform:"uppercase" }}>Calendar</div></div>
             <DashboardCalendar trades={trades} notes={notes} dayMeta={dayMeta} setDayMeta={setDayMeta} onSelectTrade={onSelectTrade} />
           </div>
         </div>
@@ -765,10 +765,7 @@ function DashboardCalendar({ trades, notes, dayMeta, setDayMeta, onSelectTrade }
             </div>
           </div>
         ) : (
-          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", height:280, gap:10, color:"var(--dim)" }}>
-            <div style={{ fontSize:34 }}>📅</div>
-            
-          </div>
+          <div style={{ height:280 }} />
         )}
       </div>
     </div>
@@ -1119,11 +1116,6 @@ export default function App() {
       localStorage.setItem(JOURNAL_STORAGE_KEY, JSON.stringify(journalDays));
     } catch(e) {}
   }, [journalDays]);
-
-
-  useEffect(()=>{
-    if (page !== "trades") setSelTrade(null);
-  }, [page]);
 
   useEffect(()=>{
     try {
