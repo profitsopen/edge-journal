@@ -773,6 +773,10 @@ function TradeDetailPage({ trades, selectedDayId, selectedTradeId, onBack, dayMe
             <div style={{ display:"flex", gap:8 }}>{[{v:"Y",l:"✓ YES",c:"var(--green)"},{v:"N",l:"✗ NO",c:"var(--red)"}].map(o=><button key={o.v} type="button" onClick={()=>upd("rules", n.rules===o.v?null:o.v)} style={{ flex:1, padding:"7px 0", border:`1px solid ${n.rules===o.v?o.c:"var(--border)"}`, borderRadius:6, background:n.rules===o.v?o.c+"22":"transparent", color:n.rules===o.v?o.c:"var(--muted)", fontSize:12, fontWeight:700 }}>{o.l}</button>)}</div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
 
         <div style={{ marginBottom:16 }}>
           <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:10 }}>MISTAKE TAGS</div>
