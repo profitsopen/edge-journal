@@ -1,4 +1,4 @@
 {
-  "buildCommand": "cd edge-journal && npm install && npm run build",
-  "outputDirectory": "edge-journal/dist"
+  "buildCommand": "if [ -d edge-journal ]; then cd edge-journal; fi; npm ci || npm install; npm run build; if [ -d dist ] && [ ! -d ../dist ] && [ -d .. ]; then cp -R dist ../dist; fi",
+  "outputDirectory": "dist"
 }
