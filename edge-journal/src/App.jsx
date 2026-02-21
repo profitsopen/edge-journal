@@ -1120,6 +1120,11 @@ export default function App() {
     } catch(e) {}
   }, [journalDays]);
 
+
+  useEffect(()=>{
+    if (page !== "trades") setSelTrade(null);
+  }, [page]);
+
   useEffect(()=>{
     try {
       const t = localStorage.getItem("ej_trades");
