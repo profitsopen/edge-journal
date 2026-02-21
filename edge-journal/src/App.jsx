@@ -1214,6 +1214,10 @@ export default function App() {
 
 
   useEffect(()=>{
+    if (page !== "trades") setSelTrade(null);
+  }, [page]);
+
+  useEffect(()=>{
     try {
       const t = localStorage.getItem("ej_trades");
       const n = localStorage.getItem("ej_notes");
