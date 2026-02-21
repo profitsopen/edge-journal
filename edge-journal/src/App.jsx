@@ -663,6 +663,22 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport }) {
     );
   });
 
+  const metrics = useMemo(() => {
+    if (!filtered.length) {
+      return { accountReturn:0, avgReturn:0, winRate:0, profitFactor:0 };
+    }
+    const wins = filtered.filter(t=>t.pnl > 0);
+    const losses = filtered.filter(t=>t.pnl < 0);
+    const grossProfit = wins.reduce((a,t)=>a+t.pnl,0);
+    const grossLoss = Math.abs(losses.reduce((a,t)=>a+t.pnl,0));
+    const accountReturn = filtered.reduce((a,t)=>a+t.pnl,0);
+    const avgReturn = accountReturn / filtered.length;
+    const winRate = wins.length / filtered.length;
+    const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0;
+
+    return { accountReturn, avgReturn, winRate, profitFactor };
+  },[filtered]);
+
   const unreviewedCount = trades.filter(t=>!isReviewed(notes[t.id])).length;
 
   return (
@@ -698,6 +714,36 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport }) {
           <option value="all">All Dates</option>
           {dates.map(d=><option key={d} value={d}>{d}</option>)}
         </select>
+      </div>
+
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(4, minmax(0, 1fr))", gap:10, marginBottom:14 }}>
+        {[
+          {
+            label:"ACCOUNT RETURN",
+            value:fmt(metrics.accountReturn,1),
+            color:metrics.accountReturn >= 0 ? "var(--green)" : "var(--red)",
+          },
+          {
+            label:"PROFIT FACTOR",
+            value:Number.isFinite(metrics.profitFactor) ? metrics.profitFactor.toFixed(2) : "∞",
+            color:metrics.profitFactor >= 1 || !Number.isFinite(metrics.profitFactor) ? "var(--green)" : "var(--red)",
+          },
+          {
+            label:"AVERAGE RETURN",
+            value:fmt(metrics.avgReturn,1),
+            color:metrics.avgReturn >= 0 ? "var(--green)" : "var(--red)",
+          },
+          {
+            label:"WIN %",
+            value:`${Math.round(metrics.winRate*100)}%`,
+            color:metrics.winRate >= 0.5 ? "var(--green)" : "var(--red)",
+          },
+        ].map(card=>(
+          <div key={card.label} style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:8, padding:"12px 14px" }}>
+            <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.08em", marginBottom:6 }}>{card.label}</div>
+            <div style={{ fontFamily:"var(--font-display)", fontSize:22, fontWeight:700, color:card.color, lineHeight:1 }}>{card.value}</div>
+          </div>
+        ))}
       </div>
 
       {/* Table */}
