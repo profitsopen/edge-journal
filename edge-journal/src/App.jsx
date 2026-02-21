@@ -1009,6 +1009,78 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade }) {
       if (i === -1) return [...prev, updater({ date, notesHtml:"", image:"" })];
       return prev.map((d, idx)=>idx===i ? updater(d) : d);
     });
+function JournalPage({ trades }) {
+  const initialDays = useMemo(() => {
+    const byDate = trades.reduce((acc, t) => {
+      if (!acc[t.date]) acc[t.date] = [];
+      acc[t.date].push(t);
+      return acc;
+    }, {});
+
+    return Object.entries(byDate)
+      .map(([date, dayTrades]) => ({
+        id: date,
+        date,
+        notesHtml: "",
+        image: "",
+        trades: dayTrades.map(t => ({
+          id: `jr_${t.id}`,
+          time: t.entryTime?.slice(0,5) || "",
+          symbol: t.symbol,
+          side: t.side,
+          qty: t.contracts,
+          entry: t.entryPrice,
+          exit: t.exitPrice,
+          pnl: t.pnl,
+        })),
+      }))
+      .sort((a,b)=>toJournalDate(b.date)-toJournalDate(a.date));
+  }, [trades]);
+
+  const [days, setDays] = useState(() => {
+    try {
+      const saved = localStorage.getItem(JOURNAL_STORAGE_KEY);
+      const parsed = saved ? JSON.parse(saved) : [];
+      if (!parsed.length) return initialDays;
+      const savedMap = new Map(parsed.map(d=>[d.date,d]));
+      const merged = initialDays.map(d => savedMap.get(d.date) || d);
+      const extras = parsed.filter(d=>!merged.some(x=>x.date===d.date));
+      return [...merged, ...extras].sort((a,b)=>toJournalDate(b.date)-toJournalDate(a.date));
+    } catch {
+      return initialDays;
+    }
+  });
+  const [selectedDayId, setSelectedDayId] = useState(initialDays[0]?.id || "");
+  const [editingTrade, setEditingTrade] = useState(null);
+  const notesRef = useRef(null);
+  const fileRef = useRef(null);
+
+  useEffect(() => {
+    setDays(prev => {
+      const savedMap = new Map(prev.map(d=>[d.date,d]));
+      const merged = initialDays.map(d => savedMap.get(d.date) || d);
+      const extras = prev.filter(d=>!merged.some(x=>x.date===d.date));
+      return [...merged, ...extras].sort((a,b)=>toJournalDate(b.date)-toJournalDate(a.date));
+    });
+  }, [initialDays]);
+
+  useEffect(() => {
+    if (!days.length) return;
+    if (!days.some(d=>d.id===selectedDayId)) setSelectedDayId(days[0].id);
+  }, [days, selectedDayId]);
+
+  useEffect(() => {
+    localStorage.setItem(JOURNAL_STORAGE_KEY, JSON.stringify(days));
+  }, [days]);
+
+  const selected = days.find(d=>d.id===selectedDayId) || days[0];
+
+  useEffect(() => {
+    if (notesRef.current && selected) notesRef.current.innerHTML = selected.notesHtml || "";
+  }, [selectedDayId, selected?.notesHtml]);
+
+  const updateDay = (dayId, updater) => {
+    setDays(prev => prev.map(d => (d.id===dayId ? updater(d) : d)));
   };
 
   const applyFormat = cmd => {
@@ -1052,6 +1124,13 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade }) {
   });
 
   if (!selectedDate) {
+    if (!file || !selected) return;
+    const reader = new FileReader();
+    reader.onload = e => updateDay(selected.id, d => ({ ...d, image: String(e.target.result) }));
+    reader.readAsDataURL(file);
+  };
+
+  if (!selected) {
     return <div style={{ color:"var(--muted)", fontFamily:"var(--font-mono)" }}>No trading days available yet.</div>;
   }
 
@@ -1081,6 +1160,24 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade }) {
                 <span>Avg Loss <b style={{ color:"var(--red)", marginLeft:4 }}>{fmt(s.avgLoss,2)}</b></span>
                 <span>Win % <b style={{ color:"var(--text)", marginLeft:4 }}>{s.winRate.toFixed(1)}%</b></span>
                 <span>PF <b style={{ color:"var(--text)", marginLeft:4 }}>{s.pf.toFixed(2)}</b></span>
+    <div style={{ display:"grid", gridTemplateColumns:"430px 1fr", height:"calc(100vh - 146px)", border:"1px solid var(--border)", borderRadius:10, overflow:"hidden" }}>
+      <div style={{ borderRight:"1px solid var(--border)", background:"#111a36", overflowY:"auto" }}>
+        {days.map(day => {
+          const net = day.trades.reduce((a,t)=>a+Number(t.pnl||0),0);
+          const selectedCard = day.id===selected.id;
+          return (
+            <button
+              key={day.id}
+              onClick={()=>setSelectedDayId(day.id)}
+              style={{ width:"100%", textAlign:"left", background:selectedCard?"#182451":"#0f1831", border:"none", borderBottom:"1px solid var(--border)", padding:"16px 14px", color:"var(--text)" }}
+              aria-pressed={selectedCard}
+              aria-label={`Open ${fmtJournalDate(day.date)}`}
+              type="button"
+            >
+              <div style={{ fontFamily:"var(--font-display)", fontSize:34, color:net>=0?"#06b2c9":"var(--red)", fontWeight:700, margin:"8px 0 12px" }}>{fmt(net,2)}</div>
+              <div style={{ display:"flex", justifyContent:"space-between", color:"#a6b9d8", fontFamily:"var(--font-mono)", fontSize:11 }}>
+                <span>{fmtJournalDate(day.date)}</span>
+                <span>{day.trades.length} trades</span>
               </div>
             </button>
           );
@@ -1096,6 +1193,19 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade }) {
 
         <div style={{ padding:"16px" }}>
           <div style={{ fontFamily:"var(--font-display)", fontSize:42, fontWeight:700, marginBottom:10 }}>{toJournalDate(selectedDate).toLocaleDateString("en-US", { month:"long", day:"numeric", year:"numeric" })}</div>
+      <div style={{ padding:"0", background:"#101a33", overflowY:"auto" }}>
+        <div style={{ borderBottom:"1px solid var(--border)", padding:"8px 14px", display:"flex", gap:8 }}>
+          {[
+            ["B","bold","Bold"],
+            [<i key="i">I</i>,"italic","Italic"],
+            [<u key="u">U</u>,"underline","Underline"],
+            ["•","insertUnorderedList","Bulleted list"],
+            ["1.","insertOrderedList","Numbered list"],
+          ].map(([label, cmd, aria], i)=>(<Btn key={i} onClick={()=>applyFormat(cmd)} style={{ padding:"6px 10px", minWidth:32 }} aria-label={aria}>{label}</Btn>))}
+        </div>
+
+        <div style={{ padding:"16px" }}>
+          <div style={{ fontFamily:"var(--font-display)", fontSize:48, fontWeight:700, marginBottom:10 }}>{toJournalDate(selected.date).toLocaleDateString("en-US", { month:"long", day:"numeric", year:"numeric" })}</div>
           <div
             ref={notesRef}
             contentEditable
@@ -1103,6 +1213,9 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade }) {
             onInput={e=>updateMeta(selectedDate, d=>({ ...d, notesHtml:e.currentTarget.innerHTML==="<br>"?"":e.currentTarget.innerHTML }))}
             data-placeholder="Type your notes here..."
             style={{ minHeight:180, outline:"none", color:"var(--text)", fontFamily:"var(--font-mono)", fontSize:14, borderBottom:"1px solid var(--border)", paddingBottom:18 }}
+            onInput={e=>updateDay(selected.id, d=>({ ...d, notesHtml:e.currentTarget.innerHTML==="<br>"?"":e.currentTarget.innerHTML }))}
+            data-placeholder="Type your notes here..."
+            style={{ minHeight:220, outline:"none", color:"var(--text)", fontFamily:"var(--font-mono)", fontSize:15 }}
             className="journal-notes"
             aria-label="Journal notes"
           />
@@ -1117,6 +1230,16 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade }) {
                 <div style={{ marginTop:8, display:"flex", gap:8 }}>
                   <Btn onClick={()=>fileRef.current?.click()}>Replace</Btn>
                   <Btn onClick={()=>updateMeta(selectedDate, d=>({ ...d, image:"" }))} variant="ghost">Remove</Btn>
+          <div style={{ borderTop:"1px solid #0a1226", paddingTop:16, marginTop:16 }}>
+            <div style={{ marginBottom:10, fontFamily:"var(--font-display)", fontSize:16 }}>Image</div>
+            {!selected.image ? (
+              <button type="button" onClick={()=>fileRef.current?.click()} style={{ width:140, height:140, border:"1px dashed var(--muted)", background:"transparent", color:"var(--muted)", fontFamily:"var(--font-mono)" }}>ADD IMAGE</button>
+            ) : (
+              <div>
+                <img src={selected.image} alt="Journal upload" style={{ maxWidth:360, borderRadius:8, border:"1px solid var(--border)" }} />
+                <div style={{ marginTop:8, display:"flex", gap:8 }}>
+                  <Btn onClick={()=>fileRef.current?.click()}>Replace</Btn>
+                  <Btn onClick={()=>updateDay(selected.id, d=>({ ...d, image:"" }))} variant="ghost">Remove</Btn>
                 </div>
               </div>
             )}
@@ -1126,6 +1249,8 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade }) {
           <div style={{ marginTop:20 }}>
             <SectionTitle title="Trades" action={<Btn onClick={()=>setEditingTrade({ id:`jr_manual_${Date.now()}`, time:"", symbol:"", side:"LONG", qty:1, entry:"", exit:"", pnl:"" })}>+ Add Trade</Btn>} />
             {!selectedTrades.length ? (
+            <SectionTitle title="Trades" action={<Btn onClick={()=>setEditingTrade({ id:`jr_${Date.now()}`, time:"", symbol:"", side:"LONG", qty:1, entry:"", exit:"", pnl:"" })}>+ Add Trade</Btn>} />
+            {!selected.trades.length ? (
               <div style={{ border:"1px dashed var(--border2)", borderRadius:8, padding:16, color:"var(--muted)", fontFamily:"var(--font-mono)", fontSize:12 }}>No trades logged for this day yet.</div>
             ) : (
               <div style={{ border:"1px solid var(--border)", borderRadius:8, overflow:"hidden" }}>
@@ -1148,6 +1273,18 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade }) {
                         <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>
                           <button type="button" onClick={(e)=>{e.stopPropagation(); setEditingTrade(makeDraftFromTrade(t));}} style={{ background:"transparent", border:"none", color:"var(--blue)", marginRight:8 }}>Edit</button>
                           <button type="button" onClick={(e)=>{e.stopPropagation(); onDeleteTrade(t.id);}} style={{ background:"transparent", border:"none", color:"var(--red)" }}>Delete</button>
+                    {selected.trades.map(t=>(
+                      <tr key={t.id} className="hover-row">
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.time}</td>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.symbol}</td>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.side}</td>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.qty}</td>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.entry}</td>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.exit}</td>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)", color:t.pnl>=0?"var(--green)":"var(--red)" }}>{fmt(t.pnl,2)}</td>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>
+                          <button type="button" onClick={()=>setEditingTrade({ ...t })} style={{ background:"transparent", border:"none", color:"var(--blue)", marginRight:8 }}>Edit</button>
+                          <button type="button" onClick={()=>updateDay(selected.id, d=>({ ...d, trades:d.trades.filter(x=>x.id!==t.id) }))} style={{ background:"transparent", border:"none", color:"var(--red)" }}>Delete</button>
                         </td>
                       </tr>
                     ))}
@@ -1159,6 +1296,9 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade }) {
             {editingTrade && (
               <div style={{ marginTop:12, border:"1px solid var(--border)", borderRadius:8, padding:12, display:"grid", gridTemplateColumns:"repeat(7,minmax(0,1fr))", gap:8 }}>
                 {[["time","Time"],["symbol","Symbol"],["side","Side"],["qty","Qty"],["entry","Entry"],["exit","Exit"],["pnl","P&L"]].map(([k,l])=>(
+                {[
+                  ["time","Time"],["symbol","Symbol"],["side","Side"],["qty","Qty"],["entry","Entry"],["exit","Exit"],["pnl","P&L"],
+                ].map(([k,l])=>(
                   <label key={k} style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", display:"flex", flexDirection:"column", gap:4 }}>
                     {l}
                     <input value={editingTrade[k]} onChange={e=>setEditingTrade(p=>({...p,[k]:e.target.value}))} style={{ background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:6, padding:"8px", fontSize:12 }} />
@@ -1183,6 +1323,11 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade }) {
                       win: pnl > 0,
                     };
                     onUpsertTrade(trade);
+                    const trade = { ...editingTrade, qty:Number(editingTrade.qty||0), entry:Number(editingTrade.entry||0), exit:Number(editingTrade.exit||0), pnl:Number(editingTrade.pnl||0) };
+                    updateDay(selected.id, d=>{
+                      const exists = d.trades.some(x=>x.id===trade.id);
+                      return { ...d, trades: exists ? d.trades.map(x=>x.id===trade.id?trade:x) : [...d.trades, trade] };
+                    });
                     setEditingTrade(null);
                   }} variant="primary">Save Trade</Btn>
                   <Btn onClick={()=>setEditingTrade(null)} variant="ghost">Cancel</Btn>
@@ -1212,6 +1357,10 @@ export default function App() {
   const [playbooks, setPlaybooks] = useState(DEMO_PLAYBOOKS);
   const [selTrade,  setSelTrade]  = useState(null);
 
+
+  useEffect(()=>{
+    if (page !== "trades") setSelTrade(null);
+  }, [page]);
 
   useEffect(()=>{
     try {
@@ -1319,6 +1468,7 @@ export default function App() {
           {page==="calendar"  && <Calendar   trades={trades} notes={notes}/>} 
           {page==="playbook"  && <Playbook   trades={trades} notes={notes} playbooks={playbooks} setPlaybooks={setPlaybooks}/>} 
           {page==="journal"   && <JournalPage trades={trades} onSelectTrade={setSelTrade} onUpsertTrade={upsertTrade} onDeleteTrade={deleteTrade}/>} 
+          {page==="journal"   && <JournalPage trades={trades}/>} 
         </div>
       </div>
 
