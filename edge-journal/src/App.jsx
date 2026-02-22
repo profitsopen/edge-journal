@@ -1,8 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppLayout from "./layout/AppLayout";
-import Dashboard from "./pages/Dashboard";
-import TradeLog from "./pages/TradeLog";
 import Journal from "./pages/Journal";
+import { Area, AreaChart, Bar, BarChart, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { loadAppState, saveCoreState, saveJournalDays } from "./lib/storage";
 
 const GlobalStyles = () => (
