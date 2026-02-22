@@ -6,8 +6,9 @@ import { loadAppState, saveCoreState, saveJournalDays } from "./lib/storage";
 
 const GlobalStyles = () => (
   <style>{`
+    @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root { --bg: #080c10; --surface: #0e1419; --surface2: #141c24; --surface3: #1a2433; --border: #1e2d3d; --border2: #243447; --text: #e2eaf4; --muted: #5a7a9a; --green: #00e5a0; --red: #ff4d6a; }
+    :root { --bg: #080c10; --surface: #0e1419; --surface2: #141c24; --surface3: #1a2433; --border: #1e2d3d; --border2: #243447; --text: #e2eaf4; --muted: #5a7a9a; --green: #00e5a0; --red: #ff4d6a; --font-display: "Syne", sans-serif; --font-mono: "JetBrains Mono", monospace; }
     html, body, #root { height: 100%; background: var(--bg); color: var(--text); }
     ::-webkit-scrollbar { width: 4px; height: 4px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -1112,6 +1113,7 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
   const [editingTrade, setEditingTrade] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
   const [draftHtml, setDraftHtml] = useState("");
+  const lastLoadedDayRef = useRef("");
   const notesRef = useRef(null);
   const fileRef = useRef(null);
 
@@ -1135,8 +1137,22 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
 
   useEffect(() => {
     const nextHtml = selectedMeta.notesHtml || "";
+    const editor = notesRef.current;
+    const switchedDays = lastLoadedDayRef.current !== selectedDate;
+
+    if (switchedDays) {
+      lastLoadedDayRef.current = selectedDate;
+      setDraftHtml(nextHtml);
+      if (editor && editor.innerHTML !== nextHtml) editor.innerHTML = nextHtml;
+      return;
+    }
+
+    if (!editor) return;
+    const editorFocused = document.activeElement === editor;
+    if (editorFocused) return;
+
+    if (editor.innerHTML !== nextHtml) editor.innerHTML = nextHtml;
     setDraftHtml(nextHtml);
-    if (notesRef.current) notesRef.current.innerHTML = nextHtml;
   }, [selectedDate, selectedMeta.notesHtml]);
 
   useEffect(() => {
@@ -1257,7 +1273,7 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
           <div style={{ paddingTop:16, marginTop:16 }}>
             <div style={{ marginBottom:10, fontFamily:"var(--font-display)", fontSize:16 }}>Image</div>
             {!selectedMeta.image ? (
-              <button type="button" onClick={()=>fileRef.current?.click()} style={{ width:140, height:140, border:"1px dashed var(--border2)", background:"transparent", color:"var(--muted)", fontFamily:"var(--font-mono)" }}>ADD IMAGE</button>
+              <button type="button" onClick={()=>fileRef.current?.click()} style={{ width:140, height:140, border:"1px dashed var(--border2)", background:"transparent", color:"var(--muted)", fontFamily:"var(--font-mono)" }}>Add Image</button>
             ) : (
               <div>
                 <img src={selectedMeta.image} alt="Journal upload" style={{ maxWidth:360, borderRadius:8, border:"1px solid var(--border)" }} />
