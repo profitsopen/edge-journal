@@ -665,7 +665,6 @@ function TradeChart({ candles, entrySec, exitSec }) {
 }
 
 function TradeDetailPage({ trades, selectedDayId, selectedTradeId, onBack, dayMeta, setDayMeta, notes, onUpdate, onClearTradeNotes, playbooks }) {
-  const [candles, setCandles] = useState([]);
   const [draftDayHtml, setDraftDayHtml] = useState("");
   const notesRef = useRef(null);
   const fileRef = useRef(null);
@@ -673,7 +672,7 @@ function TradeDetailPage({ trades, selectedDayId, selectedTradeId, onBack, dayMe
 
   const selectedTrade = trades.find(t => t.id === selectedTradeId) || null;
   const dayId = selectedDayId || selectedTrade?.date;
-  const selectedMeta = normalizeJournalDays(dayMeta).find(d => d.date === dayId) || { date: dayId, notesHtml: "", image: "" };
+  const selectedMeta = normalizeJournalDays(dayMeta).find(d => d.date === dayId) || { date: dayId, notesHtml: "", image: "", chartImages: [] };
   const n = selectedTrade ? (notes[selectedTrade.id] || {}) : {};
   const upd = (k, v) => selectedTrade && onUpdate(selectedTrade.id, k, v);
 
@@ -709,19 +708,12 @@ function TradeDetailPage({ trades, selectedDayId, selectedTradeId, onBack, dayMe
     if (!date) return;
     setDayMeta(prev => {
       const i = prev.findIndex(d=>d.date===date);
-      if (i === -1) return [...prev, updater({ date, notesHtml:"", image:"" })];
+      if (i === -1) return [...prev, updater({ date, notesHtml:"", image:"", chartImages:[] })];
       return prev.map((d, idx)=>idx===i ? updater(d) : d);
     });
   };
 
-  useEffect(() => {
-    if (!selectedTrade) return;
-    const { startSec, endSec } = getTradeWindow(selectedTrade);
-    fetchCandles({ symbol: selectedTrade.symbol, startSec, endSec, timeframe: "1m" }).then(setCandles);
-  }, [selectedTrade]);
-
   if (!selectedTrade) return null;
-  const { entrySec, exitSec } = getTradeWindow(selectedTrade);
   const rVal = calcR(selectedTrade.pnl, n.risk1R);
 
   const applyFormat = cmd => {
@@ -750,10 +742,6 @@ function TradeDetailPage({ trades, selectedDayId, selectedTradeId, onBack, dayMe
         </div>
       </div>
 
-      <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:16, marginBottom:12 }}>
-        <SectionTitle title="Chart" />
-        <TradeChart candles={candles} entrySec={entrySec} exitSec={exitSec} />
-      </div>
 
       <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:16, marginBottom:12 }}>
         <SectionTitle title="Journal (Day)" />
@@ -766,30 +754,34 @@ function TradeDetailPage({ trades, selectedDayId, selectedTradeId, onBack, dayMe
           <div ref={notesRef} contentEditable dir="ltr" suppressContentEditableWarning onInput={e=>{ const html = e.currentTarget.innerHTML; setDraftDayHtml(html==="<br>"?"":html); }} data-placeholder="Type your notes here..." className="journal-notes" style={{ minHeight:120, border:"1px solid var(--border)", borderRadius:8, padding:10, direction:"ltr", unicodeBidi:"plaintext" }} />
 
           <div style={{ border:"1px solid var(--border)", borderRadius:8, padding:10 }}>
-            {!selectedMeta.image ? (
-              <button
-                type="button"
-                onClick={()=>fileRef.current?.click()}
-                style={{ background:"none", border:"none", color:"var(--blue)", textDecoration:"underline", padding:0, fontSize:12, fontFamily:"var(--font-mono)" }}
-              >
-                Add Image
-              </button>
-            ) : (
+            <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.08em", marginBottom:8 }}>CHART REFERENCES</div>
+            <button
+              type="button"
+              onClick={()=>fileRef.current?.click()}
+              style={{ background:"none", border:"none", color:"var(--blue)", textDecoration:"underline", padding:0, fontSize:12, fontFamily:"var(--font-mono)" }}
+            >
+              Add Images
+            </button>
+            {!!selectedMeta.chartImages?.length && (
               <>
-                <img src={selectedMeta.image} alt="Journal upload" style={{ width:"100%", borderRadius:8, border:"1px solid var(--border)", marginBottom:8 }} />
-                <div style={{ display:"flex", gap:8 }}>
-                  <button type="button" onClick={()=>fileRef.current?.click()} style={{ background:"none", border:"none", color:"var(--blue)", textDecoration:"underline", padding:0, fontSize:12, fontFamily:"var(--font-mono)" }}>Replace</button>
-                  <button type="button" onClick={()=>updateMeta(dayId, d=>({ ...d, image:"" }))} style={{ background:"none", border:"none", color:"var(--red)", textDecoration:"underline", padding:0, fontSize:12, fontFamily:"var(--font-mono)" }}>Remove</button>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginTop:10 }}>
+                  {selectedMeta.chartImages.map((img, idx)=>(
+                    <div key={idx} style={{ position:"relative" }}>
+                      <img src={img} alt={`Chart reference ${idx + 1}`} style={{ width:"100%", borderRadius:6, border:"1px solid var(--border)", display:"block" }} />
+                      <button type="button" onClick={()=>updateMeta(dayId, d=>({ ...d, chartImages:(d.chartImages||[]).filter((_,i)=>i!==idx) }))} style={{ position:"absolute", top:6, right:6, background:"#000b", border:"1px solid var(--border2)", color:"var(--red)", borderRadius:4, fontSize:11, padding:"1px 5px" }}>×</button>
+                    </div>
+                  ))}
                 </div>
+                <button type="button" onClick={()=>updateMeta(dayId, d=>({ ...d, chartImages:[] }))} style={{ marginTop:8, background:"none", border:"none", color:"var(--red)", textDecoration:"underline", padding:0, fontSize:12, fontFamily:"var(--font-mono)" }}>Remove All</button>
               </>
             )}
           </div>
         </div>
-        <input ref={fileRef} type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>updateMeta(dayId,d=>({ ...d, image:String(ev.target.result) })); r.readAsDataURL(f); e.target.value=""; }} />
+        <input ref={fileRef} type="file" accept="image/*" multiple style={{ display:"none" }} onChange={e=>{ const files=Array.from(e.target.files||[]); if(!files.length) return; Promise.all(files.map(file=>new Promise(resolve=>{ const r=new FileReader(); r.onload=ev=>resolve(String(ev.target.result)); r.readAsDataURL(file); }))).then(images=>updateMeta(dayId,d=>({ ...d, chartImages:[...(d.chartImages||[]), ...images] }))); e.target.value=""; }} />
       </div>
 
       <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:16 }}>
-        <SectionTitle title="Trade Review Form" action={<Btn variant="ghost" onClick={()=>{ onClearTradeNotes?.(selectedTrade.id); setDraftDayHtml(""); if (notesRef.current) notesRef.current.innerHTML = ""; updateMeta(dayId, d=>({ ...d, notesHtml:"", image:"" })); }}>Clear All Inputs</Btn>} />
+        <SectionTitle title="Trade Review Form" action={<Btn variant="ghost" onClick={()=>{ onClearTradeNotes?.(selectedTrade.id); setDraftDayHtml(""); if (notesRef.current) notesRef.current.innerHTML = ""; updateMeta(dayId, d=>({ ...d, notesHtml:"", image:"", chartImages:[] })); }}>Clear All Inputs</Btn>} />
 
         <div style={{ background:"var(--surface2)", border:"1px solid var(--border2)", borderRadius:9, padding:"14px 16px", marginBottom:16 }}>
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
@@ -1227,6 +1219,7 @@ const normalizeJournalDays = (raw) => {
       date: d.date,
       notesHtml: typeof d.notesHtml === "string" ? d.notesHtml : "",
       image: typeof d.image === "string" ? d.image : "",
+      chartImages: Array.isArray(d.chartImages) ? d.chartImages.filter(v=>typeof v === "string") : (typeof d.image === "string" && d.image ? [d.image] : []),
     }));
 };
 
