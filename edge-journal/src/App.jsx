@@ -1,8 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppLayout from "./layout/AppLayout";
-import Dashboard from "./pages/Dashboard";
-import TradeLog from "./pages/TradeLog";
 import Journal from "./pages/Journal";
+import { Area, AreaChart, Bar, BarChart, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { loadAppState, saveCoreState, saveJournalDays } from "./lib/storage";
 
 const GlobalStyles = () => (
@@ -1134,7 +1133,8 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
   const selectedMeta = dayMetaMap.get(selectedDate) || { date:selectedDate, notesHtml:"", image:"" };
 
   useEffect(() => {
-    if (notesRef.current) notesRef.current.innerHTML = selectedMeta.notesHtml || "";
+    const nextHtml = selectedMeta.notesHtml || "";
+    if (notesRef.current && notesRef.current.innerHTML !== nextHtml) notesRef.current.innerHTML = nextHtml;
   }, [selectedMeta.notesHtml, selectedDate]);
 
   const updateMeta = (date, updater) => {
@@ -1234,10 +1234,11 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
           <div
             ref={notesRef}
             contentEditable
+            dir="ltr"
             suppressContentEditableWarning
             onInput={e=>{ const html = e.currentTarget.innerHTML; updateMeta(selectedDate, d=>({ ...d, notesHtml:html==="<br>"?"":html })); }}
             data-placeholder="Type your notes here..."
-            style={{ minHeight:180, outline:"none", color:"var(--text)", fontFamily:"var(--font-mono)", fontSize:14, borderBottom:"1px solid var(--border)", paddingBottom:18 }}
+            style={{ minHeight:180, outline:"none", color:"var(--text)", fontFamily:"var(--font-mono)", fontSize:14, borderBottom:"1px solid var(--border)", paddingBottom:18, direction:"ltr", unicodeBidi:"plaintext" }}
             className="journal-notes"
             aria-label="Journal notes"
           />
