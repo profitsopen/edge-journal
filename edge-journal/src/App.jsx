@@ -1112,6 +1112,7 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
   const [editingTrade, setEditingTrade] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
   const [draftHtml, setDraftHtml] = useState("");
+  const lastLoadedDayRef = useRef("");
   const notesRef = useRef(null);
   const fileRef = useRef(null);
 
@@ -1135,8 +1136,22 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
 
   useEffect(() => {
     const nextHtml = selectedMeta.notesHtml || "";
+    const editor = notesRef.current;
+    const switchedDays = lastLoadedDayRef.current !== selectedDate;
+
+    if (switchedDays) {
+      lastLoadedDayRef.current = selectedDate;
+      setDraftHtml(nextHtml);
+      if (editor && editor.innerHTML !== nextHtml) editor.innerHTML = nextHtml;
+      return;
+    }
+
+    if (!editor) return;
+    const editorFocused = document.activeElement === editor;
+    if (editorFocused) return;
+
+    if (editor.innerHTML !== nextHtml) editor.innerHTML = nextHtml;
     setDraftHtml(nextHtml);
-    if (notesRef.current) notesRef.current.innerHTML = nextHtml;
   }, [selectedDate, selectedMeta.notesHtml]);
 
   useEffect(() => {
@@ -1257,7 +1272,7 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
           <div style={{ paddingTop:16, marginTop:16 }}>
             <div style={{ marginBottom:10, fontFamily:"var(--font-display)", fontSize:16 }}>Image</div>
             {!selectedMeta.image ? (
-              <button type="button" onClick={()=>fileRef.current?.click()} style={{ width:140, height:140, border:"1px dashed var(--border2)", background:"transparent", color:"var(--muted)", fontFamily:"var(--font-mono)" }}>ADD IMAGE</button>
+              <button type="button" onClick={()=>fileRef.current?.click()} style={{ width:140, height:140, border:"1px dashed var(--border2)", background:"transparent", color:"var(--muted)", fontFamily:"var(--font-mono)" }}>Add Image</button>
             ) : (
               <div>
                 <img src={selectedMeta.image} alt="Journal upload" style={{ maxWidth:360, borderRadius:8, border:"1px solid var(--border)" }} />
