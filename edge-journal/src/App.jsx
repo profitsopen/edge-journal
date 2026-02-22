@@ -641,10 +641,12 @@ function TradeChart({ candles, entrySec, exitSec }) {
   return <div ref={hostRef} style={{ width: "100%", minHeight: 280 }} aria-label="Trade chart" />;
 }
 
-function TradeDetailPage({ trades, selectedDayId, selectedTradeId, onBack, dayMeta, setDayMeta, notes, onUpdate, playbooks }) {
+function TradeDetailPage({ trades, selectedDayId, selectedTradeId, onBack, dayMeta, setDayMeta, notes, onUpdate, onClearTradeNotes, playbooks }) {
   const [candles, setCandles] = useState([]);
+  const [draftDayHtml, setDraftDayHtml] = useState("");
   const notesRef = useRef(null);
   const fileRef = useRef(null);
+  const lastLoadedDayRef = useRef("");
 
   const selectedTrade = trades.find(t => t.id === selectedTradeId) || null;
   const dayId = selectedDayId || selectedTrade?.date;
@@ -653,8 +655,32 @@ function TradeDetailPage({ trades, selectedDayId, selectedTradeId, onBack, dayMe
   const upd = (k, v) => selectedTrade && onUpdate(selectedTrade.id, k, v);
 
   useEffect(() => {
-    if (notesRef.current) notesRef.current.innerHTML = selectedMeta.notesHtml || "";
+    const nextHtml = selectedMeta.notesHtml || "";
+    const editor = notesRef.current;
+    const switchedDays = lastLoadedDayRef.current !== dayId;
+
+    if (switchedDays) {
+      lastLoadedDayRef.current = dayId;
+      setDraftDayHtml(nextHtml);
+      if (editor && editor.innerHTML !== nextHtml) editor.innerHTML = nextHtml;
+      return;
+    }
+
+    if (!editor) return;
+    if (document.activeElement === editor) return;
+
+    if (editor.innerHTML !== nextHtml) editor.innerHTML = nextHtml;
+    setDraftDayHtml(nextHtml);
   }, [selectedMeta.notesHtml, dayId]);
+
+  useEffect(() => {
+    if (!dayId) return;
+    const nextHtml = draftDayHtml === "<br>" ? "" : draftDayHtml;
+    const timer = setTimeout(() => {
+      updateMeta(dayId, d => (d.notesHtml === nextHtml ? d : { ...d, notesHtml: nextHtml }));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [draftDayHtml, dayId]);
 
   const updateMeta = (date, updater) => {
     if (!date) return;
@@ -714,7 +740,7 @@ function TradeDetailPage({ trades, selectedDayId, selectedTradeId, onBack, dayMe
           ))}
         </div>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 320px", gap:14, alignItems:"start" }}>
-          <div ref={notesRef} contentEditable suppressContentEditableWarning onInput={e=>{ const html = e.currentTarget.innerHTML; updateMeta(dayId, d=>({ ...d, notesHtml:html==="<br>"?"":html })); }} data-placeholder="Type your notes here..." className="journal-notes" style={{ minHeight:120, border:"1px solid var(--border)", borderRadius:8, padding:10 }} />
+          <div ref={notesRef} contentEditable dir="ltr" suppressContentEditableWarning onInput={e=>{ const html = e.currentTarget.innerHTML; setDraftDayHtml(html==="<br>"?"":html); }} data-placeholder="Type your notes here..." className="journal-notes" style={{ minHeight:120, border:"1px solid var(--border)", borderRadius:8, padding:10, direction:"ltr", unicodeBidi:"plaintext" }} />
 
           <div style={{ border:"1px solid var(--border)", borderRadius:8, padding:10 }}>
             {!selectedMeta.image ? (
@@ -740,7 +766,7 @@ function TradeDetailPage({ trades, selectedDayId, selectedTradeId, onBack, dayMe
       </div>
 
       <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:16 }}>
-        <SectionTitle title="Trade Review Form" />
+        <SectionTitle title="Trade Review Form" action={<Btn variant="ghost" onClick={()=>{ onClearTradeNotes?.(selectedTrade.id); setDraftDayHtml(""); if (notesRef.current) notesRef.current.innerHTML = ""; updateMeta(dayId, d=>({ ...d, notesHtml:"", image:"" })); }}>Clear All Inputs</Btn>} />
 
         <div style={{ background:"var(--surface2)", border:"1px solid var(--border2)", borderRadius:9, padding:"14px 16px", marginBottom:16 }}>
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
@@ -1511,7 +1537,7 @@ export default function App() {
 
         <div style={{ flex:1, overflowY:"auto", padding:"24px 28px" }}>
           {page==="dashboard" && <Dashboard trades={trades} notes={notes} dayMeta={journalDays} setDayMeta={setJournalDays} onSelectTrade={setSelTrade}/>} 
-          {page==="trades"    && (viewMode==="TRADE_DETAIL" ? <TradeDetailPage trades={trades} selectedDayId={selectedDayId} selectedTradeId={selectedTradeId} onBack={()=>setViewMode("DAY")} dayMeta={journalDays} setDayMeta={setJournalDays} notes={notes} onUpdate={updateNote} playbooks={playbooks} /> : <TradeLog trades={trades} notes={notes} playbooks={playbooks} onSelect={openTradeDetail} onImport={importTrades}/>)} 
+          {page==="trades"    && (viewMode==="TRADE_DETAIL" ? <TradeDetailPage trades={trades} selectedDayId={selectedDayId} selectedTradeId={selectedTradeId} onBack={()=>setViewMode("DAY")} dayMeta={journalDays} setDayMeta={setJournalDays} notes={notes} onUpdate={updateNote} onClearTradeNotes={(tradeId)=>setNotes(prev=>{ const next={...prev}; delete next[tradeId]; return next; })} playbooks={playbooks} /> : <TradeLog trades={trades} notes={notes} playbooks={playbooks} onSelect={openTradeDetail} onImport={importTrades}/>)} 
           {page==="playbook"  && <Playbook   trades={trades} notes={notes} playbooks={playbooks} setPlaybooks={setPlaybooks}/>} 
           {page==="journal"   && <JournalPage trades={trades} onSelectTrade={setSelTrade} onUpsertTrade={upsertTrade} onDeleteTrade={deleteTrade} dayMeta={journalDays} setDayMeta={setJournalDays}/>} 
         </div>
