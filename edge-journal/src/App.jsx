@@ -6,8 +6,9 @@ import { loadAppState, saveCoreState, saveJournalDays } from "./lib/storage";
 
 const GlobalStyles = () => (
   <style>{`
+    @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root { --bg: #080c10; --surface: #0e1419; --surface2: #141c24; --surface3: #1a2433; --border: #1e2d3d; --border2: #243447; --text: #e2eaf4; --muted: #5a7a9a; --green: #00e5a0; --red: #ff4d6a; }
+    :root { --bg: #080c10; --surface: #0e1419; --surface2: #141c24; --surface3: #1a2433; --border: #1e2d3d; --border2: #243447; --text: #e2eaf4; --muted: #5a7a9a; --green: #00e5a0; --red: #ff4d6a; --font-display: "Syne", sans-serif; --font-mono: "JetBrains Mono", monospace; }
     html, body, #root { height: 100%; background: var(--bg); color: var(--text); }
     ::-webkit-scrollbar { width: 4px; height: 4px; }
     ::-webkit-scrollbar-track { background: transparent; }
