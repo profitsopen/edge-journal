@@ -1,8 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppLayout from "./layout/AppLayout";
-import Dashboard from "./pages/Dashboard";
-import TradeLog from "./pages/TradeLog";
 import Journal from "./pages/Journal";
+import { Area, AreaChart, Bar, BarChart, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { loadAppState, saveCoreState, saveJournalDays } from "./lib/storage";
 
 const GlobalStyles = () => (
@@ -1112,6 +1111,7 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
   const [selectedDayId, setSelectedDayId] = useState("");
   const [editingTrade, setEditingTrade] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
+  const [draftHtml, setDraftHtml] = useState("");
   const notesRef = useRef(null);
   const fileRef = useRef(null);
 
@@ -1134,8 +1134,19 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
   const selectedMeta = dayMetaMap.get(selectedDate) || { date:selectedDate, notesHtml:"", image:"" };
 
   useEffect(() => {
-    if (notesRef.current) notesRef.current.innerHTML = selectedMeta.notesHtml || "";
-  }, [selectedMeta.notesHtml, selectedDate]);
+    const nextHtml = selectedMeta.notesHtml || "";
+    setDraftHtml(nextHtml);
+    if (notesRef.current) notesRef.current.innerHTML = nextHtml;
+  }, [selectedDate, selectedMeta.notesHtml]);
+
+  useEffect(() => {
+    if (!selectedDate) return;
+    const nextHtml = draftHtml === "<br>" ? "" : draftHtml;
+    const timer = setTimeout(() => {
+      updateMeta(selectedDate, d => (d.notesHtml === nextHtml ? d : { ...d, notesHtml: nextHtml }));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [draftHtml, selectedDate]);
 
   const updateMeta = (date, updater) => {
     if (!date) return;
@@ -1234,10 +1245,11 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
           <div
             ref={notesRef}
             contentEditable
+            dir="ltr"
             suppressContentEditableWarning
-            onInput={e=>{ const html = e.currentTarget.innerHTML; updateMeta(selectedDate, d=>({ ...d, notesHtml:html==="<br>"?"":html })); }}
+            onInput={e=>{ const html = e.currentTarget.innerHTML; setDraftHtml(html==="<br>"?"":html); }}
             data-placeholder="Type your notes here..."
-            style={{ minHeight:180, outline:"none", color:"var(--text)", fontFamily:"var(--font-mono)", fontSize:14, borderBottom:"1px solid var(--border)", paddingBottom:18 }}
+            style={{ minHeight:180, outline:"none", color:"var(--text)", fontFamily:"var(--font-mono)", fontSize:14, borderBottom:"1px solid var(--border)", paddingBottom:18, direction:"ltr", unicodeBidi:"plaintext" }}
             className="journal-notes"
             aria-label="Journal notes"
           />
