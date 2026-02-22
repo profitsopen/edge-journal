@@ -1133,7 +1133,8 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
   const selectedMeta = dayMetaMap.get(selectedDate) || { date:selectedDate, notesHtml:"", image:"" };
 
   useEffect(() => {
-    if (notesRef.current) notesRef.current.innerHTML = selectedMeta.notesHtml || "";
+    const nextHtml = selectedMeta.notesHtml || "";
+    if (notesRef.current && notesRef.current.innerHTML !== nextHtml) notesRef.current.innerHTML = nextHtml;
   }, [selectedMeta.notesHtml, selectedDate]);
 
   const updateMeta = (date, updater) => {
