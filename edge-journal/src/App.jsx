@@ -956,6 +956,77 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport }) {
   );
 }
 
+
+
+function ChartStudioPage({ trades }) {
+  const [selectedTradeId, setSelectedTradeId] = useState(trades[0]?.id || "");
+  const [candles, setCandles] = useState([]);
+
+  const selectedTrade = useMemo(() => trades.find(t => t.id === selectedTradeId) || trades[0] || null, [trades, selectedTradeId]);
+
+  useEffect(() => {
+    if (!selectedTrade) return;
+    const { startSec, endSec } = getTradeWindow(selectedTrade);
+    fetchCandles({ symbol: selectedTrade.symbol, startSec, endSec, timeframe: "1m" }).then(setCandles);
+  }, [selectedTrade]);
+
+  if (!selectedTrade) {
+    return <div style={{ color:"var(--muted)", fontFamily:"var(--font-mono)" }}>No trades available for chart studio.</div>;
+  }
+
+  const { entrySec, exitSec } = getTradeWindow(selectedTrade);
+  const runningCurve = candles.map((c, idx) => ({
+    i: idx,
+    value: Number((((c.close || 0) - (candles[0]?.open || c.open || 0)) * selectedTrade.contracts).toFixed(2)),
+  }));
+
+  return (
+    <div style={{ display:"grid", gridTemplateColumns:"280px 1fr 320px", gap:12, minHeight:"calc(100vh - 190px)" }}>
+      <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:12, overflowY:"auto" }}>
+        <div style={{ fontFamily:"var(--font-display)", fontSize:14, marginBottom:10 }}>Trade Stats</div>
+        <div style={{ background:"var(--surface2)", border:"1px solid var(--border2)", borderRadius:8, padding:10, marginBottom:12 }}>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginBottom:6 }}>{selectedTrade.symbol} · {selectedTrade.date}</div>
+          <div style={{ color:selectedTrade.pnl>=0?"var(--green)":"var(--red)", fontFamily:"var(--font-display)", fontSize:28, fontWeight:700 }}>{fmt(selectedTrade.pnl,1)}</div>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:6 }}>Side {selectedTrade.side} · Qty {selectedTrade.contracts}</div>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)" }}>Entry {selectedTrade.entryPrice} · Exit {selectedTrade.exitPrice}</div>
+        </div>
+
+        <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", marginBottom:8, letterSpacing:"0.08em" }}>TRADES</div>
+        {trades.map(t => (
+          <button key={t.id} type="button" onClick={() => setSelectedTradeId(t.id)} style={{ width:"100%", textAlign:"left", padding:"8px 10px", borderRadius:8, border:`1px solid ${t.id===selectedTrade.id?"var(--blue)":"var(--border)"}`, background:t.id===selectedTrade.id?"var(--blue-dim)":"var(--surface)", color:"var(--text)", marginBottom:6 }}>
+            <div style={{ fontFamily:"var(--font-mono)", fontSize:11 }}>{t.date} · {t.symbol}</div>
+            <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:t.pnl>=0?"var(--green)":"var(--red)" }}>{fmt(t.pnl,1)}</div>
+          </button>
+        ))}
+      </div>
+
+      <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:12, display:"flex", flexDirection:"column" }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
+          <div style={{ fontFamily:"var(--font-display)", fontSize:16 }}>{selectedTrade.symbol} · 1m</div>
+          <div style={{ display:"flex", gap:6 }}>
+            {["1m", "5m", "15m"].map(tf => <Btn key={tf} variant="ghost" style={{ padding:"4px 8px" }}>{tf}</Btn>)}
+          </div>
+        </div>
+        <TradeChart candles={candles} entrySec={entrySec} exitSec={exitSec} />
+      </div>
+
+      <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:12 }}>
+        <div style={{ fontFamily:"var(--font-display)", fontSize:14, marginBottom:8 }}>Running PnL</div>
+        <div style={{ height:280 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={runningCurve}>
+              <XAxis dataKey="i" tick={false} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill:"#5a7a9a", fontSize:10 }} axisLine={false} tickLine={false} />
+              <Tooltip formatter={(v)=>fmt(v,2)} labelFormatter={()=>""} />
+              <Area type="monotone" dataKey="value" stroke="#00e5a0" fill="#00e5a015" />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── CALENDAR ─────────────────────────────────────────────────────────────────
 function DashboardCalendar({ trades, notes, dayMeta, setDayMeta, onSelectTrade }) {
   const [month, setMonth] = useState(new Date().getMonth()+1);
@@ -1420,6 +1491,7 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
 const NAV_ITEMS = [
   { id:"dashboard", icon:"◈", label:"Dashboard" },
   { id:"trades",    icon:"≡", label:"Trade Log"  },
+  { id:"charts",    icon:"▣", label:"Charts"     },
   { id:"playbook",  icon:"◆", label:"Playbook"   },
   { id:"journal",   icon:"✎", label:"Journal"    },
 ];
@@ -1561,6 +1633,7 @@ export default function App() {
         <div style={{ flex:1, overflowY:"auto", padding:"24px 28px" }}>
           {page==="dashboard" && <Dashboard trades={trades} notes={notes} dayMeta={journalDays} setDayMeta={setJournalDays} onSelectTrade={setSelTrade}/>} 
           {page==="trades"    && (viewMode==="TRADE_DETAIL" ? <TradeDetailPage trades={trades} selectedDayId={selectedDayId} selectedTradeId={selectedTradeId} onBack={()=>setViewMode("DAY")} dayMeta={journalDays} setDayMeta={setJournalDays} notes={notes} onUpdate={updateNote} onClearTradeNotes={(tradeId)=>setNotes(prev=>{ const next={...prev}; delete next[tradeId]; return next; })} playbooks={playbooks} /> : <TradeLog trades={trades} notes={notes} playbooks={playbooks} onSelect={openTradeDetail} onImport={importTrades}/>)} 
+          {page==="charts"    && <ChartStudioPage trades={trades} />} 
           {page==="playbook"  && <Playbook   trades={trades} notes={notes} playbooks={playbooks} setPlaybooks={setPlaybooks}/>} 
           {page==="journal"   && <JournalPage trades={trades} onSelectTrade={setSelTrade} onUpsertTrade={upsertTrade} onDeleteTrade={deleteTrade} dayMeta={journalDays} setDayMeta={setJournalDays}/>} 
         </div>
