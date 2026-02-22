@@ -1,14 +1,24 @@
-import { useEffect, useState } from "react";
-import AppLayout from "./layout/AppLayout";
-import Dashboard from "./pages/Dashboard";
-import TradeLog from "./pages/TradeLog";
-import Journal from "./pages/Journal";
-import { loadAppState, saveCoreState, saveJournalDays } from "./lib/storage";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import {
+  AreaChart, Area, BarChart, Bar, XAxis, YAxis,
+  Tooltip, ResponsiveContainer, Cell, ReferenceLine
+} from "recharts";
 
+// ─── GLOBAL STYLES ────────────────────────────────────────────────────────────
 const GlobalStyles = () => (
   <style>{`
+    @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root { --bg: #080c10; --surface: #0e1419; --surface2: #141c24; --surface3: #1a2433; --border: #1e2d3d; --border2: #243447; --text: #e2eaf4; --muted: #5a7a9a; --green: #00e5a0; --red: #ff4d6a; }
+    :root {
+      --bg: #080c10; --surface: #0e1419; --surface2: #141c24; --surface3: #1a2433;
+      --border: #1e2d3d; --border2: #243447;
+      --text: #e2eaf4; --muted: #5a7a9a; --dim: #2d4259;
+      --green: #00e5a0; --green-dim: #00e5a015; --green-mid: #00e5a040;
+      --red: #ff4d6a; --red-dim: #ff4d6a15; --red-mid: #ff4d6a40;
+      --blue: #3b9eff; --blue-dim: #3b9eff15; --gold: #f5c842;
+      --font-display: 'Syne', sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
     html, body, #root { height: 100%; background: var(--bg); color: var(--text); }
     ::-webkit-scrollbar { width: 4px; height: 4px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -421,132 +431,68 @@ function TradeDetail({ trade, notes, playbooks, onUpdate, onClose, onPrev, onNex
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
 function Dashboard({ trades, notes, dayMeta, setDayMeta, onSelectTrade }) {
-  const s = useMemo(()=>{
+  const s = useMemo(() => {
     if (!trades.length) return null;
-    const wins   = trades.filter(t=>t.win);
-    const losses = trades.filter(t=>!t.win);
-    const total  = trades.reduce((a,t)=>a+t.pnl,0);
-    const avgW   = wins.length   ? wins.reduce((a,t)=>a+t.pnl,0)/wins.length : 0;
-    const avgL   = losses.length ? Math.abs(losses.reduce((a,t)=>a+t.pnl,0)/losses.length) : 0;
-    const pf     = avgL > 0 ? wins.reduce((a,t)=>a+t.pnl,0) / Math.abs(losses.reduce((a,t)=>a+t.pnl,0)) : 0;
-
-    const rTrades = trades.filter(t=>calcR(t.pnl, notes[t.id]?.risk1R) != null);
-    const rVals   = rTrades.map(t=>calcR(t.pnl, notes[t.id]?.risk1R));
-    const avgR    = rVals.length ? rVals.reduce((a,b)=>a+b,0)/rVals.length : null;
-    const totalR  = rVals.length ? rVals.reduce((a,b)=>a+b,0) : null;
-
-    const reviewed   = trades.filter(t=>isReviewed(notes[t.id]));
-    const unreviewed = trades.length - reviewed.length;
-
-    const mistakeCounts = {};
-    trades.forEach(t=>{ (notes[t.id]?.mistakes||[]).forEach(m=>{ mistakeCounts[m] = (mistakeCounts[m]||0)+1; }); });
-    const topMistakes = Object.entries(mistakeCounts).sort(([,a],[,b])=>b-a).slice(0,4);
+    const wins = trades.filter((t) => t.win);
+    const losses = trades.filter((t) => !t.win);
+    const total = trades.reduce((a, t) => a + t.pnl, 0);
+    const avgW = wins.length ? wins.reduce((a, t) => a + t.pnl, 0) / wins.length : 0;
+    const avgL = losses.length ? Math.abs(losses.reduce((a, t) => a + t.pnl, 0) / losses.length) : 0;
+    const pf = avgL > 0 ? wins.reduce((a, t) => a + t.pnl, 0) / Math.abs(losses.reduce((a, t) => a + t.pnl, 0)) : 0;
 
     const byDate = {};
-    trades.forEach(t=>{ if (!byDate[t.date]) byDate[t.date]={pnl:0,count:0,wins:0}; byDate[t.date].pnl+=t.pnl; byDate[t.date].count++; if(t.win) byDate[t.date].wins++; });
-    const days = Object.entries(byDate).sort(([a],[b])=>a.localeCompare(b));
-    let run=0;
-    const curve = days.map(([date,d])=>{ run+=d.pnl; return {date:date.slice(5),cum:run,day:d.pnl}; });
-    const bySymbol = {};
-    trades.forEach(t=>{ if(!bySymbol[t.symbol]) bySymbol[t.symbol]={pnl:0,count:0,wins:0}; bySymbol[t.symbol].pnl+=t.pnl; bySymbol[t.symbol].count++; if(t.win) bySymbol[t.symbol].wins++; });
+    trades.forEach((t) => {
+      if (!byDate[t.date]) byDate[t.date] = { pnl: 0 };
+      byDate[t.date].pnl += t.pnl;
+    });
+    let run = 0;
+    const curve = Object.entries(byDate)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, d]) => ({ date: date.slice(5), cum: (run += d.pnl), day: d.pnl }));
 
-    return { total, winRate:wins.length/trades.length, avgW, avgL, pf, wCount:wins.length, lCount:losses.length, tCount:trades.length, curve, bySymbol, avgR, totalR, rCount:rVals.length, reviewed:reviewed.length, unreviewed, topMistakes };
-  },[trades,notes]);
+    const reviewed = trades.filter((t) => isReviewed(notes[t.id])).length;
+    const unreviewed = trades.length - reviewed;
 
-  if (!s) return (
-    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", height:"60vh", gap:12 }}>
-      <div style={{ fontSize:48 }}>📊</div>
-      <div style={{ fontFamily:"var(--font-display)", fontSize:18, color:"var(--muted)" }}>No trades yet — import a CSV to get started</div>
-    </div>
-  );
+    return { total, avgW, avgL, pf, winRate: wins.length / trades.length, wCount: wins.length, lCount: losses.length, curve, reviewed, unreviewed, tCount: trades.length };
+  }, [trades, notes]);
 
-  const TT = ({ active, payload }) => {
-    if (!active || !payload?.length) return null;
-    const d = payload[0].payload;
-    return (
-      <div style={{ background:"var(--surface2)", border:"1px solid var(--border2)", borderRadius:8, padding:"10px 14px", fontFamily:"var(--font-mono)", fontSize:12 }}>
-        <div style={{ color:"var(--muted)", marginBottom:4 }}>{d.date}</div>
-        <div style={{ color:d.cum>=0?"var(--green)":"var(--red)", fontWeight:600 }}>Cumulative: {fmt(d.cum,0)}</div>
-        <div style={{ color:d.day>=0?"var(--green)":"var(--red)" }}>Day: {fmt(d.day,0)}</div>
-      </div>
-    );
-  };
+  if (!s) return <div style={{ color: "var(--muted)" }}>No trades yet.</div>;
 
   return (
     <div>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:12, marginBottom:12 }}>
-        <StatCard label="NET P&L" value={fmtAbs(s.total,0)} color={s.total>=0?"var(--green)":"var(--red)"} delay="0s" big />
-        <StatCard label="WIN RATE" value={pct(s.winRate)} color="var(--blue)" delay="0.05s" />
-        <StatCard label="PROFIT FACTOR" value={s.pf.toFixed(2)} color={s.pf>=2?"var(--green)":"var(--gold)"} delay="0.10s" />
-        <StatCard label="AVG WIN" value={fmtAbs(s.avgW,0)} color="var(--green)" sub={`${s.wCount} winners`} delay="0.15s" />
-        <StatCard label="AVG LOSS" value={fmtAbs(s.avgL,0)} color="var(--red)" sub={`${s.lCount} losers`} delay="0.20s" />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 12, marginBottom: 12 }}>
+        <StatCard label="NET P&L" value={fmtAbs(s.total, 0)} color={s.total >= 0 ? "var(--green)" : "var(--red)"} big />
+        <StatCard label="WIN RATE" value={pct(s.winRate)} color="var(--blue)" />
+        <StatCard label="PROFIT FACTOR" value={s.pf.toFixed(2)} color={s.pf >= 2 ? "var(--green)" : "var(--gold)"} />
+        <StatCard label="AVG WIN" value={fmtAbs(s.avgW, 0)} color="var(--green)" sub={`${s.wCount} winners`} />
+        <StatCard label="AVG LOSS" value={fmtAbs(s.avgL, 0)} color="var(--red)" sub={`${s.lCount} losers`} />
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:12 }}>
-        <div className="fade-up" style={{ animationDelay:"0.05s", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px" }}><div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>AVG R-MULTIPLE</div><div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:s.avgR!=null?rColor(s.avgR):"var(--dim)", lineHeight:1 }}>{s.avgR!=null ? fmtR(s.avgR) : "—"}</div><div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:6 }}>{s.rCount > 0 ? `${s.rCount} trades with 1R set` : "Set 1R in trade detail to track"}</div></div>
-        <div className="fade-up" style={{ animationDelay:"0.08s", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px" }}><div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>TOTAL R EARNED</div><div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:s.totalR!=null&&s.totalR>=0?"var(--green)":s.totalR!=null?"var(--red)":"var(--dim)", lineHeight:1 }}>{s.totalR!=null ? fmtR(s.totalR) : "—"}</div><div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:6 }}>across {s.rCount} graded trades</div></div>
-        <div className="fade-up" style={{ animationDelay:"0.11s", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px" }}><div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>REVIEWED</div><div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:"var(--green)", lineHeight:1 }}>{s.reviewed}<span style={{ fontSize:14, color:"var(--muted)", fontWeight:400 }}>/{s.tCount}</span></div></div>
-        <div className="fade-up" style={{ animationDelay:"0.14s", background:"var(--surface)", border:`1px solid ${s.unreviewed>0?"var(--gold)40":"var(--border)"}`, borderRadius:10, padding:"18px 20px" }}><div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>NEEDS REVIEW</div><div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:s.unreviewed>0?"var(--gold)":"var(--green)", lineHeight:1 }}>{s.unreviewed}</div></div>
-      </div>
-
-      <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr", gap:12, marginBottom:12 }}>
-        <div style={{ display:"grid", gap:12 }}>
-          <div className="fade-up-2" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"20px 20px 12px" }}>
-            <SectionTitle title="Equity Curve" />
-            <ResponsiveContainer width="100%" height={180}>
-              <AreaChart data={s.curve} margin={{top:4,right:4,bottom:0,left:-20}}>
-                <defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#00e5a0" stopOpacity={0.2}/><stop offset="95%" stopColor="#00e5a0" stopOpacity={0}/></linearGradient></defs>
-                <XAxis dataKey="date" tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
-                <YAxis tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
-                <Tooltip content={<TT/>}/><ReferenceLine y={0} stroke="var(--border2)" strokeDasharray="3 3"/>
-                <Area type="monotone" dataKey="cum" stroke="#00e5a0" strokeWidth={2} fill="url(#g1)" dot={{fill:"#00e5a0",r:4}}/>
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="fade-up-3" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:20 }}>
-            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:16 }}><span aria-hidden="true" style={{ fontSize:12, lineHeight:1 }}>📅</span><div style={{ fontFamily:"var(--font-display)", fontSize:12, fontWeight:700, color:"var(--muted)", letterSpacing:"0.12em", textTransform:"uppercase" }}>Calendar</div></div>
-            <DashboardCalendar trades={trades} notes={notes} dayMeta={dayMeta} setDayMeta={setDayMeta} onSelectTrade={onSelectTrade} />
-          </div>
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
+        <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 20 }}>
+          <SectionTitle title="Equity Curve" />
+          <ResponsiveContainer width="100%" height={220}>
+            <AreaChart data={s.curve}>
+              <XAxis dataKey="date" tick={{ fontFamily: "var(--font-mono)", fontSize: 10, fill: "var(--muted)" }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontFamily: "var(--font-mono)", fontSize: 10, fill: "var(--muted)" }} axisLine={false} tickLine={false} />
+              <Tooltip />
+              <ReferenceLine y={0} stroke="var(--border2)" strokeDasharray="3 3" />
+              <Area type="monotone" dataKey="cum" stroke="#00e5a0" strokeWidth={2} fill="#00e5a022" />
+            </AreaChart>
+          </ResponsiveContainer>
         </div>
-
-        <div style={{ display:"grid", gap:12, alignContent:"start" }}>
-          <div className="fade-up-2" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"20px 20px 12px" }}>
-            <SectionTitle title="Daily P&L" />
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={s.curve} margin={{top:4,right:4,bottom:0,left:-20}}>
-                <XAxis dataKey="date" tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
-                <YAxis tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
-                <Tooltip content={({active,payload})=>active&&payload?.length?<div style={{background:"var(--surface2)",border:"1px solid var(--border2)",borderRadius:8,padding:"8px 12px",fontFamily:"var(--font-mono)",fontSize:12,color:payload[0].value>=0?"var(--green)":"var(--red)",fontWeight:600}}>{fmt(payload[0].value,0)}</div>:null}/>
-                <ReferenceLine y={0} stroke="var(--border2)"/>
-                <Bar dataKey="day" radius={[4,4,0,0]}>{s.curve.map((d,i)=><Cell key={i} fill={d.day>=0?"#00e5a0":"#ff4d6a"}/>)}</Bar>
-              </BarChart>
-            </ResponsiveContainer>
+        <div style={{ display: "grid", gap: 12 }}>
+          <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 20 }}>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>REVIEWED</div>
+            <div style={{ fontSize: 28, color: "var(--green)", fontWeight: 700 }}>{s.reviewed}<span style={{ fontSize: 14, color: "var(--muted)", fontWeight: 400 }}>/{s.tCount}</span></div>
           </div>
-
-          <div className="fade-up-3" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:20 }}>
-            <SectionTitle title="By Symbol"/>
-            {Object.entries(s.bySymbol).map(([sym,d])=>(
-              <div key={sym} style={{ marginBottom:14 }}>
-                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}><span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:600 }}>{sym}</span><span style={{ fontFamily:"var(--font-mono)", fontSize:12, color:d.pnl>=0?"var(--green)":"var(--red)", fontWeight:600 }}>{fmt(d.pnl,0)}</span></div>
-                <div style={{ height:3, background:"var(--border)", borderRadius:2 }}><div style={{ height:"100%", width:`${d.wins/d.count*100}%`, background:d.pnl>=0?"var(--green)":"var(--red)", borderRadius:2 }}/></div>
-                <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", marginTop:4 }}>{d.count} trades · {Math.round(d.wins/d.count*100)}% WR</div>
-              </div>
-            ))}
+          <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 20 }}>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>NEEDS REVIEW</div>
+            <div style={{ fontSize: 28, color: s.unreviewed > 0 ? "var(--gold)" : "var(--green)", fontWeight: 700 }}>{s.unreviewed}</div>
           </div>
-
-          <div className="fade-up-3" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:20 }}>
-            <SectionTitle title="Top Mistakes"/>
-            {s.topMistakes.length === 0 ? <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--dim)", paddingTop:8 }}>Tag mistakes in trade detail to see patterns</div> : s.topMistakes.map(([mid, count])=>{
-              const m = MISTAKE_OPTIONS.find(x=>x.id===mid);
-              if (!m) return null;
-              const maxCount = s.topMistakes[0][1];
-              return (
-                <div key={mid} style={{ marginBottom:12 }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}><span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:m.color, fontWeight:600 }}>{m.label}</span><span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)" }}>{count}×</span></div>
-                  <div style={{ height:3, background:"var(--border)", borderRadius:2 }}><div style={{ height:"100%", width:`${count/maxCount*100}%`, background:m.color, borderRadius:2 }}/></div>
-                </div>
-              );
-            })}
+          <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 20 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}><span aria-hidden="true">📅</span><span style={{ fontFamily: "var(--font-display)", fontSize: 12, color: "var(--muted)", letterSpacing: "0.12em", textTransform: "uppercase" }}>Calendar</span></div>
+            <DashboardCalendar trades={trades} notes={notes} dayMeta={dayMeta} setDayMeta={setDayMeta} onSelectTrade={onSelectTrade} />
           </div>
         </div>
       </div>
@@ -641,16 +587,15 @@ function TradeChart({ candles, entrySec, exitSec }) {
   return <div ref={hostRef} style={{ width: "100%", minHeight: 280 }} aria-label="Trade chart" />;
 }
 
-function TradeDetailPage({ trades, selectedDayId, selectedTradeId, onBack, dayMeta, setDayMeta, notes, onUpdate, playbooks }) {
+function TradeDetailPage({ trades, selectedDayId, selectedTradeId, onSelectTradeId, onBack, dayMeta, setDayMeta }) {
   const [candles, setCandles] = useState([]);
   const notesRef = useRef(null);
   const fileRef = useRef(null);
 
   const selectedTrade = trades.find(t => t.id === selectedTradeId) || null;
   const dayId = selectedDayId || selectedTrade?.date;
-  const selectedMeta = normalizeJournalDays(dayMeta).find(d => d.date === dayId) || { date: dayId, notesHtml: "", image: "" };
-  const n = selectedTrade ? (notes[selectedTrade.id] || {}) : {};
-  const upd = (k, v) => selectedTrade && onUpdate(selectedTrade.id, k, v);
+  const dayTrades = useMemo(() => trades.filter(t => t.date === dayId), [trades, dayId]);
+  const selectedMeta = dayMeta.find(d => d.date === dayId) || { date: dayId, notesHtml: "", image: "" };
 
   useEffect(() => {
     if (notesRef.current) notesRef.current.innerHTML = selectedMeta.notesHtml || "";
@@ -673,22 +618,18 @@ function TradeDetailPage({ trades, selectedDayId, selectedTradeId, onBack, dayMe
 
   if (!selectedTrade) return null;
   const { entrySec, exitSec } = getTradeWindow(selectedTrade);
-  const rVal = calcR(selectedTrade.pnl, n.risk1R);
 
   const applyFormat = cmd => {
     notesRef.current?.focus();
     document.execCommand(cmd, false);
   };
 
-  const toggleMistake = (mid) => {
-    const current = n.mistakes || [];
-    const next = current.includes(mid) ? current.filter(x=>x!==mid) : [...current, mid];
-    upd("mistakes", next);
-  };
-
   return (
     <div>
-      <SectionTitle title="Trade Detail" action={<Btn onClick={onBack} variant="ghost">← Back to Day</Btn>} />
+      <SectionTitle
+        title="Trade Detail"
+        action={<Btn onClick={onBack} variant="ghost">← Back to Day</Btn>}
+      />
 
       <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:16, marginBottom:12 }}>
         <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700 }}>{selectedTrade.date} · {selectedTrade.symbol}</div>
@@ -707,85 +648,37 @@ function TradeDetailPage({ trades, selectedDayId, selectedTradeId, onBack, dayMe
       </div>
 
       <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:16, marginBottom:12 }}>
-        <SectionTitle title="Journal (Day)" />
+        <SectionTitle title="Journal" />
         <div style={{ display:"flex", gap:8, marginBottom:8 }}>
           {[ ["B","bold"], [<i key="i">I</i>,"italic"], [<u key="u">U</u>,"underline"], ["•","insertUnorderedList"], ["1.","insertOrderedList"] ].map(([label,cmd],i)=>(
             <Btn key={i} onClick={()=>applyFormat(cmd)} style={{ padding:"6px 10px", minWidth:32 }}>{label}</Btn>
           ))}
         </div>
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 320px", gap:14, alignItems:"start" }}>
-          <div ref={notesRef} contentEditable suppressContentEditableWarning onInput={e=>{ const html = e.currentTarget.innerHTML; updateMeta(dayId, d=>({ ...d, notesHtml:html==="<br>"?"":html })); }} data-placeholder="Type your notes here..." className="journal-notes" style={{ minHeight:120, border:"1px solid var(--border)", borderRadius:8, padding:10 }} />
+        <div ref={notesRef} contentEditable suppressContentEditableWarning onInput={e=>updateMeta(dayId, d=>({ ...d, notesHtml:e.currentTarget.innerHTML==="<br>"?"":e.currentTarget.innerHTML }))} data-placeholder="Type your notes here..." className="journal-notes" style={{ minHeight:120, border:"1px solid var(--border)", borderRadius:8, padding:10, marginBottom:10 }} />
 
-          <div style={{ border:"1px solid var(--border)", borderRadius:8, padding:10 }}>
-            {!selectedMeta.image ? (
-              <button
-                type="button"
-                onClick={()=>fileRef.current?.click()}
-                style={{ background:"none", border:"none", color:"var(--blue)", textDecoration:"underline", padding:0, fontSize:12, fontFamily:"var(--font-mono)" }}
-              >
-                Add Image
-              </button>
-            ) : (
-              <>
-                <img src={selectedMeta.image} alt="Journal upload" style={{ width:"100%", borderRadius:8, border:"1px solid var(--border)", marginBottom:8 }} />
-                <div style={{ display:"flex", gap:8 }}>
-                  <button type="button" onClick={()=>fileRef.current?.click()} style={{ background:"none", border:"none", color:"var(--blue)", textDecoration:"underline", padding:0, fontSize:12, fontFamily:"var(--font-mono)" }}>Replace</button>
-                  <button type="button" onClick={()=>updateMeta(dayId, d=>({ ...d, image:"" }))} style={{ background:"none", border:"none", color:"var(--red)", textDecoration:"underline", padding:0, fontSize:12, fontFamily:"var(--font-mono)" }}>Remove</button>
-                </div>
-              </>
-            )}
+        {!selectedMeta.image ? (
+          <button type="button" onClick={()=>fileRef.current?.click()} style={{ width:120, height:90, border:"1px dashed var(--border2)", background:"transparent", color:"var(--muted)", fontFamily:"var(--font-mono)" }}>ADD IMAGE</button>
+        ) : (
+          <div>
+            <img src={selectedMeta.image} alt="Journal upload" style={{ maxWidth:300, borderRadius:8, border:"1px solid var(--border)" }} />
+            <div style={{ marginTop:8, display:"flex", gap:8 }}>
+              <Btn onClick={()=>fileRef.current?.click()}>Replace</Btn>
+              <Btn variant="ghost" onClick={()=>updateMeta(dayId, d=>({ ...d, image:"" }))}>Remove</Btn>
+            </div>
           </div>
-        </div>
+        )}
         <input ref={fileRef} type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>updateMeta(dayId,d=>({ ...d, image:String(ev.target.result) })); r.readAsDataURL(f); e.target.value=""; }} />
       </div>
 
       <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:16 }}>
-        <SectionTitle title="Trade Review Form" />
-
-        <div style={{ background:"var(--surface2)", border:"1px solid var(--border2)", borderRadius:9, padding:"14px 16px", marginBottom:16 }}>
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
-            <div>
-              <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:2 }}>R-MULTIPLE CALCULATOR</div>
-              <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--dim)" }}>R = P&L ÷ Initial Risk (1R)</div>
-            </div>
-            {rVal != null && <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:800, color:rColor(rVal) }}>{fmtR(rVal)}</div>}
-          </div>
-          <input type="number" min="0" step="0.5" value={n.risk1R||""} onChange={e=>upd("risk1R", e.target.value)} placeholder="My 1R risk in dollars" style={{ width:"100%", background:"var(--bg)", border:"1px solid var(--border)", borderRadius:7, padding:"9px 12px", fontSize:13, outline:"none" }} />
-        </div>
-
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16 }}>
-          <div>
-            <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>GRADE</div>
-            <div style={{ display:"flex", gap:5 }}>{["A","B","C","D","F"].map(g=><button key={g} type="button" onClick={()=>upd("grade", n.grade===g?null:g)} style={{ flex:1, padding:"7px 0", border:`1px solid ${n.grade===g?gradeColor(g):"var(--border)"}`, borderRadius:6, background:n.grade===g?gradeColor(g)+"22":"transparent", color:n.grade===g?gradeColor(g):"var(--muted)", fontSize:13, fontWeight:700 }}>{g}</button>)}</div>
-          </div>
-          <div>
-            <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>RULE ADHERENCE</div>
-            <div style={{ display:"flex", gap:8 }}>{[{v:"Y",l:"✓ YES",c:"var(--green)"},{v:"N",l:"✗ NO",c:"var(--red)"}].map(o=><button key={o.v} type="button" onClick={()=>upd("rules", n.rules===o.v?null:o.v)} style={{ flex:1, padding:"7px 0", border:`1px solid ${n.rules===o.v?o.c:"var(--border)"}`, borderRadius:6, background:n.rules===o.v?o.c+"22":"transparent", color:n.rules===o.v?o.c:"var(--muted)", fontSize:12, fontWeight:700 }}>{o.l}</button>)}</div>
-          </div>
-        </div>
-
-        <div style={{ marginBottom:16 }}>
-          <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:10 }}>MISTAKE TAGS</div>
-          <div style={{ display:"flex", flexWrap:"wrap", gap:7 }}>
-            {MISTAKE_OPTIONS.map(m=>{
-              const active = (n.mistakes||[]).includes(m.id);
-              return <button key={m.id} type="button" onClick={()=>toggleMistake(m.id)} style={{ padding:"5px 12px", borderRadius:20, border:`1px solid ${active?m.color:"var(--border)"}`, background:active?m.color+"22":"transparent", color:active?m.color:"var(--muted)", fontSize:11 }}>{active?"✕ ":""}{m.label}</button>;
-            })}
-          </div>
-        </div>
-
-        {JOURNAL_FIELDS.map(f=> (
-          <div key={f.key} style={{ marginBottom:12 }}>
-            <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:6 }}>{f.label.toUpperCase()}</div>
-            {f.type === "input" || f.type === "datalist" ? (
-              <>
-                <input value={n[f.key]||""} onChange={e=>upd(f.key,e.target.value)} placeholder={f.ph} list={f.type==="datalist"?"pb-list-trade-detail":undefined} style={{ width:"100%", background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:7, padding:"9px 12px", fontSize:12, outline:"none" }} />
-                {f.type==="datalist" && <datalist id="pb-list-trade-detail">{playbooks.map(p=><option key={p.id} value={p.name}/>)}</datalist>}
-              </>
-            ) : (
-              <textarea value={n[f.key]||""} onChange={e=>upd(f.key,e.target.value)} placeholder={f.ph} rows={f.key==="marketContext"||f.key==="didWell"||f.key==="improve"?3:2} style={{ width:"100%", background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:7, padding:"9px 12px", fontSize:12, resize:"vertical", lineHeight:1.6, outline:"none" }} />
-            )}
-          </div>
+        <SectionTitle title={`Trades for ${dayId}`} />
+        {dayTrades.map(t => (
+          <button key={t.id} type="button" onClick={()=>onSelectTradeId(t.id)} style={{ width:"100%", textAlign:"left", background:t.id===selectedTradeId?"var(--surface3)":"transparent", border:"1px solid var(--border)", borderRadius:8, padding:"10px 12px", color:"var(--text)", marginBottom:6 }}>
+            <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginRight:8 }}>{t.entryTime}</span>
+            <span style={{ marginRight:8 }}>{t.symbol}</span>
+            <span style={{ marginRight:8, color:sideColor(t.side) }}>{t.side}</span>
+            <span style={{ color:t.pnl>=0?"var(--green)":"var(--red)", fontWeight:700 }}>{fmt(t.pnl,1)}</span>
+          </button>
         ))}
       </div>
     </div>
@@ -942,7 +835,7 @@ function DashboardCalendar({ trades, notes, dayMeta, setDayMeta, onSelectTrade }
   const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   const selKey = selDay ? `${year}-${String(month).padStart(2,"0")}-${String(selDay).padStart(2,"0")}` : null;
   const selData = selKey ? byDate[selKey] : null;
-  const selectedMeta = normalizeJournalDays(dayMeta).find(d=>d.date===selKey);
+  const selectedMeta = dayMeta.find(d=>d.date===selKey);
 
   return (
     <div style={{ display:"grid", gridTemplateColumns:"1fr 320px", gap:16 }}>
@@ -1091,21 +984,7 @@ function Playbook({ trades, notes, playbooks, setPlaybooks }) {
 // ─── JOURNAL PAGE ────────────────────────────────────────────────────────────
 const JOURNAL_STORAGE_KEY = "ej_journal_days";
 
-const normalizeJournalDays = (raw) => {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter(d => d && typeof d.date === "string" && d.date.length >= 8)
-    .map(d => ({
-      date: d.date,
-      notesHtml: typeof d.notesHtml === "string" ? d.notesHtml : "",
-      image: typeof d.image === "string" ? d.image : "",
-    }));
-};
-
-const toJournalDate = d => {
-  const dt = new Date(`${d}T00:00:00`);
-  return Number.isNaN(dt.getTime()) ? new Date() : dt;
-};
+const toJournalDate = d => new Date(`${d}T00:00:00`);
 const fmtJournalDate = d => toJournalDate(d).toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric" });
 
 function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayMeta, setDayMeta }) {
@@ -1115,13 +994,12 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
   const notesRef = useRef(null);
   const fileRef = useRef(null);
 
-  const safeDayMeta = useMemo(() => normalizeJournalDays(dayMeta), [dayMeta]);
-  const dayMetaMap = useMemo(() => new Map(safeDayMeta.map(d=>[d.date,d])), [safeDayMeta]);
+  const dayMetaMap = useMemo(() => new Map(dayMeta.map(d=>[d.date,d])), [dayMeta]);
   const dayList = useMemo(() => {
     const dates = new Set(trades.map(t=>t.date));
-    safeDayMeta.forEach(d=>dates.add(d.date));
+    dayMeta.forEach(d=>dates.add(d.date));
     return [...dates].sort((a,b)=>toJournalDate(b)-toJournalDate(a));
-  }, [trades, safeDayMeta]);
+  }, [trades, dayMeta]);
 
   useEffect(() => {
     if (!selectedDayId && dayList.length) setSelectedDayId(dayList[0]);
@@ -1235,7 +1113,7 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
             ref={notesRef}
             contentEditable
             suppressContentEditableWarning
-            onInput={e=>{ const html = e.currentTarget.innerHTML; updateMeta(selectedDate, d=>({ ...d, notesHtml:html==="<br>"?"":html })); }}
+            onInput={e=>updateMeta(selectedDate, d=>({ ...d, notesHtml:e.currentTarget.innerHTML==="<br>"?"":e.currentTarget.innerHTML }))}
             data-placeholder="Type your notes here..."
             style={{ minHeight:180, outline:"none", color:"var(--text)", fontFamily:"var(--font-mono)", fontSize:14, borderBottom:"1px solid var(--border)", paddingBottom:18 }}
             className="journal-notes"
@@ -1351,7 +1229,7 @@ export default function App() {
   const [journalDays, setJournalDays] = useState(() => {
     try {
       const saved = localStorage.getItem(JOURNAL_STORAGE_KEY);
-      return normalizeJournalDays(saved ? JSON.parse(saved) : []);
+      return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
     }
@@ -1359,7 +1237,7 @@ export default function App() {
 
   useEffect(()=>{
     try {
-      localStorage.setItem(JOURNAL_STORAGE_KEY, JSON.stringify(normalizeJournalDays(journalDays)));
+      localStorage.setItem(JOURNAL_STORAGE_KEY, JSON.stringify(journalDays));
     } catch(e) {}
   }, [journalDays]);
 
@@ -1475,7 +1353,7 @@ export default function App() {
 
         <div style={{ flex:1, overflowY:"auto", padding:"24px 28px" }}>
           {page==="dashboard" && <Dashboard trades={trades} notes={notes} dayMeta={journalDays} setDayMeta={setJournalDays} onSelectTrade={setSelTrade}/>} 
-          {page==="trades"    && (viewMode==="TRADE_DETAIL" ? <TradeDetailPage trades={trades} selectedDayId={selectedDayId} selectedTradeId={selectedTradeId} onBack={()=>setViewMode("DAY")} dayMeta={journalDays} setDayMeta={setJournalDays} notes={notes} onUpdate={updateNote} playbooks={playbooks} /> : <TradeLog trades={trades} notes={notes} playbooks={playbooks} onSelect={openTradeDetail} onImport={importTrades}/>)} 
+          {page==="trades"    && (viewMode==="TRADE_DETAIL" ? <TradeDetailPage trades={trades} selectedDayId={selectedDayId} selectedTradeId={selectedTradeId} onSelectTradeId={setSelectedTradeId} onBack={()=>setViewMode("DAY")} dayMeta={journalDays} setDayMeta={setJournalDays} /> : <TradeLog trades={trades} notes={notes} playbooks={playbooks} onSelect={openTradeDetail} onImport={importTrades}/>)} 
           {page==="playbook"  && <Playbook   trades={trades} notes={notes} playbooks={playbooks} setPlaybooks={setPlaybooks}/>} 
           {page==="journal"   && <JournalPage trades={trades} onSelectTrade={setSelTrade} onUpsertTrade={upsertTrade} onDeleteTrade={deleteTrade} dayMeta={journalDays} setDayMeta={setJournalDays}/>} 
         </div>
