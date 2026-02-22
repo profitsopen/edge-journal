@@ -595,7 +595,7 @@ function TradeChart({ candles, entrySec, exitSec }) {
 
   useEffect(() => {
     let chart;
-    let series;
+    let candlestickSeries;
     let ro;
     let canceled = false;
 
@@ -603,29 +603,52 @@ function TradeChart({ candles, entrySec, exitSec }) {
       try {
         const dep = "lightweight-charts";
         const mod = await import(/* @vite-ignore */ dep);
-        if (canceled || !hostRef.current) return;
-        chart = mod.createChart(hostRef.current, {
+        const container = hostRef.current;
+        if (canceled || !container) return;
+
+        chart = mod.createChart(container, {
+          width: container.clientWidth,
+          height: 280,
           layout: { background: { color: "#0e1419" }, textColor: "#8ea1bd" },
           grid: { vertLines: { color: "#1e2d3d" }, horzLines: { color: "#1e2d3d" } },
           rightPriceScale: { borderColor: "#243447" },
           timeScale: { borderColor: "#243447", timeVisible: true, secondsVisible: false },
-          height: 280,
         });
-        series = chart.addCandlestickSeries({
-          upColor: "#00e5a0", downColor: "#ff4d6a", borderVisible: false,
-          wickUpColor: "#00e5a0", wickDownColor: "#ff4d6a",
-        });
-        series.setData(candles);
+
+        const candleOptions = {
+          upColor: "#26a69a",
+          downColor: "#ef5350",
+          borderVisible: false,
+          wickUpColor: "#26a69a",
+          wickDownColor: "#ef5350",
+        };
+
+        if (typeof chart.addSeries === "function" && mod.CandlestickSeries) {
+          candlestickSeries = chart.addSeries(mod.CandlestickSeries, candleOptions);
+        } else {
+          candlestickSeries = chart.addCandlestickSeries(candleOptions);
+        }
+
+        candlestickSeries.setData(candles.map(c => ({
+          time: Number(c.time),
+          open: Number(c.open),
+          high: Number(c.high),
+          low: Number(c.low),
+          close: Number(c.close),
+        })));
+
         const markers = [];
-        if (entrySec) markers.push({ time: entrySec, position: "belowBar", color: "#00e5a0", shape: "arrowUp", text: "Entry" });
-        if (exitSec) markers.push({ time: exitSec, position: "aboveBar", color: "#ff4d6a", shape: "arrowDown", text: "Exit" });
-        if (typeof series.setMarkers === "function") series.setMarkers(markers);
+        if (entrySec) markers.push({ time: Number(entrySec), position: "belowBar", color: "#00e5a0", shape: "arrowUp", text: "Entry" });
+        if (exitSec) markers.push({ time: Number(exitSec), position: "aboveBar", color: "#ff4d6a", shape: "arrowDown", text: "Exit" });
+        if (typeof candlestickSeries.setMarkers === "function") candlestickSeries.setMarkers(markers);
+
         chart.timeScale().fitContent();
+
         ro = new ResizeObserver(() => {
-          if (!hostRef.current || !chart) return;
-          chart.applyOptions({ width: hostRef.current.clientWidth });
+          if (!container || !chart) return;
+          chart.applyOptions({ width: container.clientWidth });
         });
-        ro.observe(hostRef.current);
+        ro.observe(container);
       } catch {
         if (hostRef.current) hostRef.current.innerHTML = '<div style="color:#5a7a9a;padding:16px;font-family:monospace">Chart module unavailable. Add/install lightweight-charts to render candles.</div>';
       }
