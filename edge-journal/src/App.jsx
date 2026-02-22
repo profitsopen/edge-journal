@@ -6,8 +6,9 @@ import { loadAppState, saveCoreState, saveJournalDays } from "./lib/storage";
 
 const GlobalStyles = () => (
   <style>{`
+    @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root { --bg: #080c10; --surface: #0e1419; --surface2: #141c24; --surface3: #1a2433; --border: #1e2d3d; --border2: #243447; --text: #e2eaf4; --muted: #5a7a9a; --green: #00e5a0; --red: #ff4d6a; }
+    :root { --bg: #080c10; --surface: #0e1419; --surface2: #141c24; --surface3: #1a2433; --border: #1e2d3d; --border2: #243447; --text: #e2eaf4; --muted: #5a7a9a; --dim: #2d4259; --green: #00e5a0; --green-dim: #00e5a015; --green-mid: #00e5a040; --red: #ff4d6a; --red-dim: #ff4d6a15; --red-mid: #ff4d6a40; --blue: #3b9eff; --blue-dim: #3b9eff15; --gold: #f5c842; --font-display: "Syne", sans-serif; --font-mono: "JetBrains Mono", monospace; }
     html, body, #root { height: 100%; background: var(--bg); color: var(--text); }
     ::-webkit-scrollbar { width: 4px; height: 4px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -880,7 +881,7 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport }) {
               <span style={{ fontFamily:"var(--font-mono)", fontSize:13, fontWeight:700, color:t.pnl>=0?"var(--green)":"var(--red)" }}>{fmt(t.pnl,1)}</span>
               <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:700, color:rColor(rVal) }}>{fmtR(rVal)}</span>
               <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:rev?"var(--green)":"var(--gold)" }}>{rev?"✓ done":"○ open"}</span>
-              <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:filled>0?"var(--blue)":"var(--dim)" }}>
+              <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:filled>0?"var(--blue)":"var(--dim)", fontWeight:filled>0?700:500 }}>
                 {mistakes.length>0&&<span style={{ color:"var(--red)", marginRight:2 }}>⚠</span>}
                 {filled>0?`●${filled}`:"○"}
               </span>
@@ -911,6 +912,7 @@ function DashboardCalendar({ trades, notes, dayMeta, setDayMeta, onSelectTrade }
   const [month, setMonth] = useState(new Date().getMonth()+1);
   const [year, setYear] = useState(new Date().getFullYear());
   const [selDay, setSelDay] = useState(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   const byDate = useMemo(() => {
     const m = {};
@@ -944,7 +946,7 @@ function DashboardCalendar({ trades, notes, dayMeta, setDayMeta, onSelectTrade }
   const selectedMeta = normalizeJournalDays(dayMeta).find(d=>d.date===selKey);
 
   return (
-    <div style={{ display:"grid", gridTemplateColumns:"1fr 320px", gap:16 }}>
+    <div>
       <div>
         <div style={{ display:"flex", alignItems:"center", gap:16, marginBottom:14 }}>
           <button type="button" onClick={()=>{if(month===1){setMonth(12);setYear(y=>y-1);}else setMonth(m=>m-1);}} style={{ background:"none", border:"none", color:"var(--muted)", fontSize:18 }}>‹</button>
@@ -972,29 +974,36 @@ function DashboardCalendar({ trades, notes, dayMeta, setDayMeta, onSelectTrade }
         </div>
       </div>
 
-      <div>
-        {selKey && selData ? (
-          <div className="fade-up">
-            <div style={{ fontFamily:"var(--font-display)", fontSize:16, fontWeight:700, marginBottom:10 }}>{selKey}</div>
-            {selData.trades.map(t=>(
-              <div key={t.id} onClick={()=>onSelectTrade?.(t)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 10px", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:7, marginBottom:6, cursor:"pointer" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                  <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)" }}>{t.entryTime}</span>
-                  <Chip color={sideColor(t.side)}>{t.side}</Chip>
-                  <span style={{ fontFamily:"var(--font-mono)", fontSize:11 }}>{t.symbol}</span>
-                </div>
-                <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:700, color:t.pnl>=0?"var(--green)":"var(--red)" }}>{fmt(t.pnl,1)}</span>
-              </div>
-            ))}
-            <div style={{ marginTop:12 }}>
-              <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>DAILY REVIEW</div>
-              <textarea value={toPlain(selectedMeta?.notesHtml||"")} onChange={e=>updateMeta(selKey, d=>({ ...d, notesHtml: toHtml(e.target.value) }))} placeholder="Overall read, how you felt, themes that worked, what to carry forward…" rows={5} style={{ width:"100%", background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:8, padding:"10px 12px", fontSize:12, resize:"vertical", lineHeight:1.7, outline:"none" }} />
-            </div>
+      {selKey && selData ? (
+        <div className="fade-up" style={{ marginTop:14 }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+            <div style={{ fontFamily:"var(--font-display)", fontSize:16, fontWeight:700 }}>{selKey}</div>
+            <Btn onClick={()=>setReviewOpen(true)} style={{ padding:"6px 10px" }}>Daily Review</Btn>
           </div>
-        ) : (
-          <div style={{ height:280 }} />
-        )}
-      </div>
+          {selData.trades.map(t=>(
+            <div key={t.id} onClick={()=>onSelectTrade?.(t)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 10px", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:7, marginBottom:6, cursor:"pointer" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)" }}>{t.entryTime}</span>
+                <Chip color={sideColor(t.side)}>{t.side}</Chip>
+                <span style={{ fontFamily:"var(--font-mono)", fontSize:11 }}>{t.symbol}</span>
+              </div>
+              <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:700, color:t.pnl>=0?"var(--green)":"var(--red)" }}>{fmt(t.pnl,1)}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {reviewOpen && selKey && (
+        <div style={{ position:"fixed", inset:0, background:"#0009", zIndex:900, display:"flex", justifyContent:"flex-end" }} onClick={()=>setReviewOpen(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{ width:420, height:"100%", background:"var(--surface)", borderLeft:"1px solid var(--border2)", padding:16 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+              <div style={{ fontFamily:"var(--font-display)", fontSize:16, fontWeight:700 }}>Daily Review · {selKey}</div>
+              <button type="button" onClick={()=>setReviewOpen(false)} style={{ background:"none", border:"none", color:"var(--muted)", fontSize:20 }}>×</button>
+            </div>
+            <textarea value={toPlain(selectedMeta?.notesHtml||"")} onChange={e=>updateMeta(selKey, d=>({ ...d, notesHtml: toHtml(e.target.value) }))} placeholder="Overall read, how you felt, themes that worked, what to carry forward…" rows={16} style={{ width:"100%", height:"calc(100% - 42px)", background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:8, padding:"10px 12px", fontSize:12, resize:"none", lineHeight:1.7, outline:"none", color:"var(--text)" }} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1112,6 +1121,7 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
   const [editingTrade, setEditingTrade] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
   const [draftHtml, setDraftHtml] = useState("");
+  const lastLoadedDayRef = useRef("");
   const notesRef = useRef(null);
   const fileRef = useRef(null);
 
@@ -1135,8 +1145,22 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
 
   useEffect(() => {
     const nextHtml = selectedMeta.notesHtml || "";
+    const editor = notesRef.current;
+    const switchedDays = lastLoadedDayRef.current !== selectedDate;
+
+    if (switchedDays) {
+      lastLoadedDayRef.current = selectedDate;
+      setDraftHtml(nextHtml);
+      if (editor && editor.innerHTML !== nextHtml) editor.innerHTML = nextHtml;
+      return;
+    }
+
+    if (!editor) return;
+    const editorFocused = document.activeElement === editor;
+    if (editorFocused) return;
+
+    if (editor.innerHTML !== nextHtml) editor.innerHTML = nextHtml;
     setDraftHtml(nextHtml);
-    if (notesRef.current) notesRef.current.innerHTML = nextHtml;
   }, [selectedDate, selectedMeta.notesHtml]);
 
   useEffect(() => {
@@ -1257,7 +1281,7 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
           <div style={{ paddingTop:16, marginTop:16 }}>
             <div style={{ marginBottom:10, fontFamily:"var(--font-display)", fontSize:16 }}>Image</div>
             {!selectedMeta.image ? (
-              <button type="button" onClick={()=>fileRef.current?.click()} style={{ width:140, height:140, border:"1px dashed var(--border2)", background:"transparent", color:"var(--muted)", fontFamily:"var(--font-mono)" }}>ADD IMAGE</button>
+              <button type="button" onClick={()=>fileRef.current?.click()} style={{ width:140, height:140, border:"1px dashed var(--border2)", background:"transparent", color:"var(--muted)", fontFamily:"var(--font-mono)" }}>Add Image</button>
             ) : (
               <div>
                 <img src={selectedMeta.image} alt="Journal upload" style={{ maxWidth:360, borderRadius:8, border:"1px solid var(--border)" }} />
@@ -1457,7 +1481,7 @@ export default function App() {
               <span style={{ fontFamily:"var(--font-display)", fontSize:13, fontWeight:600 }}>{n.label}</span>
               {/* Badge for unreviewed on Trade Log */}
               {n.id==="trades" && unreviewed > 0 && (
-                <span style={{ marginLeft:"auto", background:"var(--gold)", color:"#000", borderRadius:10, fontSize:9, fontWeight:800, padding:"2px 6px", fontFamily:"var(--font-mono)" }}>{unreviewed}</span>
+                <span style={{ marginLeft:"auto", background:"var(--gold)22", border:"1px solid var(--gold)", color:"var(--gold)", borderRadius:10, fontSize:10, fontWeight:800, padding:"2px 7px", fontFamily:"var(--font-mono)" }}>{unreviewed}</span>
               )}
             </div>
           ))}
@@ -1481,7 +1505,7 @@ export default function App() {
             {NAV_ITEMS.find(n=>n.id===page)?.label}
           </div>
           <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)" }}>
-            {trades.length} trades · {unreviewed > 0 ? <span style={{ color:"var(--gold)" }}>{unreviewed} unreviewed</span> : <span style={{ color:"var(--green)" }}>all reviewed ✓</span>}
+            <span style={{ color:"var(--text)" }}>{trades.length} trades</span> · {unreviewed > 0 ? <span style={{ color:"var(--gold)" }}>{unreviewed} unreviewed</span> : <span style={{ color:"var(--green)" }}>all reviewed ✓</span>}
           </div>
         </div>
 
