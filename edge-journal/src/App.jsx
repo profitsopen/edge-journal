@@ -555,115 +555,6 @@ function Dashboard({ trades, notes, dayMeta, setDayMeta, onSelectTrade }) {
 }
 
 
-const toUnixSec = (date, time="00:00:00") => {
-  const safe = `${date}T${(time || "00:00:00").slice(0,8)}`;
-  return Math.floor(new Date(safe).getTime() / 1000);
-};
-
-const getTradeWindow = trade => {
-  const entrySec = toUnixSec(trade.date, trade.entryTime);
-  const hasExit = !!trade.exitTime;
-  const exitSec = hasExit ? toUnixSec(trade.date, trade.exitTime) : null;
-  return {
-    startSec: entrySec - 60 * 60,
-    endSec: hasExit ? exitSec + 60 * 60 : entrySec + 120 * 60,
-    entrySec,
-    exitSec,
-  };
-};
-
-async function fetchCandles({ symbol, startSec, endSec, timeframe="1m" }) {
-  const tf = timeframe === "5m" ? 300 : 60;
-  const candles = [];
-  let t = startSec - (startSec % tf);
-  let base = 100 + (symbol || "SYM").split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 50;
-  while (t <= endSec) {
-    const drift = Math.sin(t / 3600) * 0.4;
-    const open = base;
-    const close = open + drift + (Math.floor(t / tf) % 3 - 1) * 0.12;
-    const high = Math.max(open, close) + 0.35;
-    const low = Math.min(open, close) - 0.35;
-    candles.push({ time: t, open, high, low, close });
-    base = close;
-    t += tf;
-  }
-  return candles;
-}
-
-function TradeChart({ candles, entrySec, exitSec }) {
-  const hostRef = useRef(null);
-
-  useEffect(() => {
-    let chart;
-    let candlestickSeries;
-    let ro;
-    let canceled = false;
-
-    (async () => {
-      try {
-        const dep = "lightweight-charts";
-        const mod = await import(/* @vite-ignore */ dep);
-        const container = hostRef.current;
-        if (canceled || !container) return;
-
-        chart = mod.createChart(container, {
-          width: container.clientWidth,
-          height: 280,
-          layout: { background: { color: "#0e1419" }, textColor: "#8ea1bd" },
-          grid: { vertLines: { color: "#1e2d3d" }, horzLines: { color: "#1e2d3d" } },
-          rightPriceScale: { borderColor: "#243447" },
-          timeScale: { borderColor: "#243447", timeVisible: true, secondsVisible: false },
-        });
-
-        const candleOptions = {
-          upColor: "#26a69a",
-          downColor: "#ef5350",
-          borderVisible: false,
-          wickUpColor: "#26a69a",
-          wickDownColor: "#ef5350",
-        };
-
-        if (typeof chart.addSeries === "function" && mod.CandlestickSeries) {
-          candlestickSeries = chart.addSeries(mod.CandlestickSeries, candleOptions);
-        } else {
-          candlestickSeries = chart.addCandlestickSeries(candleOptions);
-        }
-
-        candlestickSeries.setData(candles.map(c => ({
-          time: Number(c.time),
-          open: Number(c.open),
-          high: Number(c.high),
-          low: Number(c.low),
-          close: Number(c.close),
-        })));
-
-        const markers = [];
-        if (entrySec) markers.push({ time: Number(entrySec), position: "belowBar", color: "#00e5a0", shape: "arrowUp", text: "Entry" });
-        if (exitSec) markers.push({ time: Number(exitSec), position: "aboveBar", color: "#ff4d6a", shape: "arrowDown", text: "Exit" });
-        if (typeof candlestickSeries.setMarkers === "function") candlestickSeries.setMarkers(markers);
-
-        chart.timeScale().fitContent();
-
-        ro = new ResizeObserver(() => {
-          if (!container || !chart) return;
-          chart.applyOptions({ width: container.clientWidth });
-        });
-        ro.observe(container);
-      } catch {
-        if (hostRef.current) hostRef.current.innerHTML = '<div style="color:#5a7a9a;padding:16px;font-family:monospace">Chart module unavailable. Add/install lightweight-charts to render candles.</div>';
-      }
-    })();
-
-    return () => {
-      canceled = true;
-      ro?.disconnect();
-      chart?.remove();
-    };
-  }, [candles, entrySec, exitSec]);
-
-  return <div ref={hostRef} style={{ width: "100%", minHeight: 280 }} aria-label="Trade chart" />;
-}
-
 function TradeDetailPage({ trades, selectedDayId, selectedTradeId, onBack, dayMeta, setDayMeta, notes, onUpdate, onClearTradeNotes, playbooks }) {
   const [draftDayHtml, setDraftDayHtml] = useState("");
   const notesRef = useRef(null);
@@ -949,75 +840,6 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport }) {
 }
 
 
-
-function ChartStudioPage({ trades }) {
-  const [selectedTradeId, setSelectedTradeId] = useState(trades[0]?.id || "");
-  const [candles, setCandles] = useState([]);
-
-  const selectedTrade = useMemo(() => trades.find(t => t.id === selectedTradeId) || trades[0] || null, [trades, selectedTradeId]);
-
-  useEffect(() => {
-    if (!selectedTrade) return;
-    const { startSec, endSec } = getTradeWindow(selectedTrade);
-    fetchCandles({ symbol: selectedTrade.symbol, startSec, endSec, timeframe: "1m" }).then(setCandles);
-  }, [selectedTrade]);
-
-  if (!selectedTrade) {
-    return <div style={{ color:"var(--muted)", fontFamily:"var(--font-mono)" }}>No trades available for chart studio.</div>;
-  }
-
-  const { entrySec, exitSec } = getTradeWindow(selectedTrade);
-  const runningCurve = candles.map((c, idx) => ({
-    i: idx,
-    value: Number((((c.close || 0) - (candles[0]?.open || c.open || 0)) * selectedTrade.contracts).toFixed(2)),
-  }));
-
-  return (
-    <div style={{ display:"grid", gridTemplateColumns:"280px 1fr 320px", gap:12, minHeight:"calc(100vh - 190px)" }}>
-      <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:12, overflowY:"auto" }}>
-        <div style={{ fontFamily:"var(--font-display)", fontSize:14, marginBottom:10 }}>Trade Stats</div>
-        <div style={{ background:"var(--surface2)", border:"1px solid var(--border2)", borderRadius:8, padding:10, marginBottom:12 }}>
-          <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginBottom:6 }}>{selectedTrade.symbol} · {selectedTrade.date}</div>
-          <div style={{ color:selectedTrade.pnl>=0?"var(--green)":"var(--red)", fontFamily:"var(--font-display)", fontSize:28, fontWeight:700 }}>{fmt(selectedTrade.pnl,1)}</div>
-          <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:6 }}>Side {selectedTrade.side} · Qty {selectedTrade.contracts}</div>
-          <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)" }}>Entry {selectedTrade.entryPrice} · Exit {selectedTrade.exitPrice}</div>
-        </div>
-
-        <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", marginBottom:8, letterSpacing:"0.08em" }}>TRADES</div>
-        {trades.map(t => (
-          <button key={t.id} type="button" onClick={() => setSelectedTradeId(t.id)} style={{ width:"100%", textAlign:"left", padding:"8px 10px", borderRadius:8, border:`1px solid ${t.id===selectedTrade.id?"var(--blue)":"var(--border)"}`, background:t.id===selectedTrade.id?"var(--blue-dim)":"var(--surface)", color:"var(--text)", marginBottom:6 }}>
-            <div style={{ fontFamily:"var(--font-mono)", fontSize:11 }}>{t.date} · {t.symbol}</div>
-            <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:t.pnl>=0?"var(--green)":"var(--red)" }}>{fmt(t.pnl,1)}</div>
-          </button>
-        ))}
-      </div>
-
-      <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:12, display:"flex", flexDirection:"column" }}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
-          <div style={{ fontFamily:"var(--font-display)", fontSize:16 }}>{selectedTrade.symbol} · 1m</div>
-          <div style={{ display:"flex", gap:6 }}>
-            {["1m", "5m", "15m"].map(tf => <Btn key={tf} variant="ghost" style={{ padding:"4px 8px" }}>{tf}</Btn>)}
-          </div>
-        </div>
-        <TradeChart candles={candles} entrySec={entrySec} exitSec={exitSec} />
-      </div>
-
-      <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:12 }}>
-        <div style={{ fontFamily:"var(--font-display)", fontSize:14, marginBottom:8 }}>Running PnL</div>
-        <div style={{ height:280 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={runningCurve}>
-              <XAxis dataKey="i" tick={false} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill:"#5a7a9a", fontSize:10 }} axisLine={false} tickLine={false} />
-              <Tooltip formatter={(v)=>fmt(v,2)} labelFormatter={()=>""} />
-              <Area type="monotone" dataKey="value" stroke="#00e5a0" fill="#00e5a015" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ─── CALENDAR ─────────────────────────────────────────────────────────────────
 function DashboardCalendar({ trades, notes, dayMeta, setDayMeta, onSelectTrade }) {
@@ -1626,7 +1448,6 @@ export default function App() {
         <div style={{ flex:1, overflowY:"auto", padding:"24px 28px" }}>
           {page==="dashboard" && <Dashboard trades={trades} notes={notes} dayMeta={journalDays} setDayMeta={setJournalDays} onSelectTrade={setSelTrade}/>} 
           {page==="trades"    && (viewMode==="TRADE_DETAIL" ? <TradeDetailPage trades={trades} selectedDayId={selectedDayId} selectedTradeId={selectedTradeId} onBack={()=>setViewMode("DAY")} dayMeta={journalDays} setDayMeta={setJournalDays} notes={notes} onUpdate={updateNote} onClearTradeNotes={(tradeId)=>setNotes(prev=>{ const next={...prev}; delete next[tradeId]; return next; })} playbooks={playbooks} /> : <TradeLog trades={trades} notes={notes} playbooks={playbooks} onSelect={openTradeDetail} onImport={importTrades}/>)} 
-          {page==="charts"    && <ChartStudioPage trades={trades} />} 
           {page==="playbook"  && <Playbook   trades={trades} notes={notes} playbooks={playbooks} setPlaybooks={setPlaybooks}/>} 
           {page==="journal"   && <JournalPage trades={trades} onSelectTrade={setSelTrade} onUpsertTrade={upsertTrade} onDeleteTrade={deleteTrade} dayMeta={journalDays} setDayMeta={setJournalDays}/>} 
         </div>
