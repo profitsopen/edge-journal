@@ -1306,6 +1306,7 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
 const NAV_ITEMS = [
   { id:"dashboard", icon:"◈", label:"Dashboard" },
   { id:"trades",    icon:"≡", label:"Trade Log"  },
+  { id:"charts",    icon:"▣", label:"Charts"     },
   { id:"playbook",  icon:"◆", label:"Playbook"   },
   { id:"journal",   icon:"✎", label:"Journal"    },
 ];
