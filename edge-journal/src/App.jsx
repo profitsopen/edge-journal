@@ -1111,6 +1111,7 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
   const [selectedDayId, setSelectedDayId] = useState("");
   const [editingTrade, setEditingTrade] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
+  const [draftHtml, setDraftHtml] = useState("");
   const notesRef = useRef(null);
   const fileRef = useRef(null);
 
@@ -1134,8 +1135,18 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
 
   useEffect(() => {
     const nextHtml = selectedMeta.notesHtml || "";
-    if (notesRef.current && notesRef.current.innerHTML !== nextHtml) notesRef.current.innerHTML = nextHtml;
-  }, [selectedMeta.notesHtml, selectedDate]);
+    setDraftHtml(nextHtml);
+    if (notesRef.current) notesRef.current.innerHTML = nextHtml;
+  }, [selectedDate, selectedMeta.notesHtml]);
+
+  useEffect(() => {
+    if (!selectedDate) return;
+    const nextHtml = draftHtml === "<br>" ? "" : draftHtml;
+    const timer = setTimeout(() => {
+      updateMeta(selectedDate, d => (d.notesHtml === nextHtml ? d : { ...d, notesHtml: nextHtml }));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [draftHtml, selectedDate]);
 
   const updateMeta = (date, updater) => {
     if (!date) return;
@@ -1236,7 +1247,7 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
             contentEditable
             dir="ltr"
             suppressContentEditableWarning
-            onInput={e=>{ const html = e.currentTarget.innerHTML; updateMeta(selectedDate, d=>({ ...d, notesHtml:html==="<br>"?"":html })); }}
+            onInput={e=>{ const html = e.currentTarget.innerHTML; setDraftHtml(html==="<br>"?"":html); }}
             data-placeholder="Type your notes here..."
             style={{ minHeight:180, outline:"none", color:"var(--text)", fontFamily:"var(--font-mono)", fontSize:14, borderBottom:"1px solid var(--border)", paddingBottom:18, direction:"ltr", unicodeBidi:"plaintext" }}
             className="journal-notes"
