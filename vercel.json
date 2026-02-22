@@ -1,0 +1,4 @@
+{
+  "buildCommand": "npm --prefix edge-journal install && npm --prefix edge-journal run build",
+  "outputDirectory": "edge-journal/dist"
+}
