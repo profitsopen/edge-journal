@@ -102,28 +102,48 @@ const rColor = (r) => {
 const isReviewed = (n) => !!(n?.grade || n?.setup?.trim());
 
 function parseCSV(text) {
-  const splitCSVLine = (line) => {
-    const cols = [];
+  const parseRows = (csvText) => {
+    const rows = [];
+    let row = [];
     let cur = "";
     let quoted = false;
-    for (let i = 0; i < line.length; i += 1) {
-      const ch = line[i];
+
+    for (let i = 0; i < csvText.length; i += 1) {
+      const ch = csvText[i];
+      const next = csvText[i + 1];
+
       if (ch === '"') {
-        if (quoted && line[i + 1] === '"') {
+        if (quoted && next === '"') {
           cur += '"';
           i += 1;
         } else {
           quoted = !quoted;
         }
-      } else if (ch === "," && !quoted) {
-        cols.push(cur.trim());
-        cur = "";
-      } else {
-        cur += ch;
+        continue;
       }
+
+      if (ch === "," && !quoted) {
+        row.push(cur.trim());
+        cur = "";
+        continue;
+      }
+
+      if ((ch === "\n" || ch === "\r") && !quoted) {
+        if (ch === "\r" && next === "\n") i += 1;
+        row.push(cur.trim());
+        const hasData = row.some((cell) => String(cell).trim() !== "");
+        if (hasData) rows.push(row);
+        row = [];
+        cur = "";
+        continue;
+      }
+
+      cur += ch;
     }
-    cols.push(cur.trim());
-    return cols;
+
+    row.push(cur.trim());
+    if (row.some((cell) => String(cell).trim() !== "")) rows.push(row);
+    return rows;
   };
 
   const toNum = (v, fallback = 0) => {
@@ -143,15 +163,51 @@ function parseCSV(text) {
   };
 
   const toIsoDate = (value) => {
-    const d = new Date(value);
-    return Number.isNaN(d.getTime()) ? new Date().toISOString().slice(0, 10) : d.toISOString().slice(0, 10);
+    const s = String(value || "").trim();
+    if (!s) return "";
+
+    const mdy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+    if (mdy) {
+      const mm = String(parseInt(mdy[1], 10)).padStart(2, "0");
+      const dd = String(parseInt(mdy[2], 10)).padStart(2, "0");
+      const yyyy = mdy[3].length === 2 ? `20${mdy[3]}` : mdy[3];
+      return `${yyyy}-${mm}-${dd}`;
+    }
+
+    const d = new Date(s);
+    return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
   };
 
   const toClock = (value) => {
-    const d = new Date(value);
+    const s = String(value || "").trim();
+    if (!s) return "00:00:00";
+
+    const explicit = s.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?/i);
+    if (explicit) {
+      let h = parseInt(explicit[1], 10);
+      const m = explicit[2];
+      const sec = explicit[3] || "00";
+      const ampm = (explicit[4] || "").toUpperCase();
+      if (ampm === "PM" && h < 12) h += 12;
+      if (ampm === "AM" && h === 12) h = 0;
+      return `${String(h).padStart(2, "0")}:${m}:${sec}`;
+    }
+
+    const d = new Date(s);
     if (Number.isNaN(d.getTime())) return "00:00:00";
     return d.toISOString().slice(11, 19);
   };
+
+  const makeTradeId = (trade) => [
+    trade.date,
+    trade.symbol,
+    trade.entryTime,
+    trade.exitTime,
+    trade.side,
+    Number(trade.entryPrice).toFixed(6),
+    Number(trade.exitPrice).toFixed(6),
+    trade.contracts,
+  ].join("_").replace(/\s+/g, "");
 
   const normalizeFillSide = (row) => {
     const bs = get(row, ["B/S", "bs", "side", "Side"]);
@@ -162,21 +218,76 @@ function parseCSV(text) {
     return "BUY";
   };
 
-  const lines = text.split(/\r?\n/).filter(Boolean);
-  if (!lines.length) return [];
-  const headers = splitCSVLine(lines[0]).map((h) => h.replace(/"/g, "").trim());
+  const parsedRows = parseRows(text || "");
+  if (!parsedRows.length) return { trades: [], skipped: 0, error: "Could not recognize Tradovate CSV columns." };
+  const headers = parsedRows[0].map((h) => h.replace(/"/g, "").trim());
 
-  const rows = lines.slice(1).map((line) => {
-    const vals = splitCSVLine(line).map((v) => v.replace(/"/g, ""));
+  const rows = parsedRows.slice(1).map((vals) => {
     const row = {};
     headers.forEach((h, i) => { row[h] = vals[i] ?? ""; });
     return row;
   }).filter((r) => r[headers[0]]);
 
+  const normalizedHeaders = headers.map((h) => h.toLowerCase().replace(/[^a-z0-9]/g, ""));
+  const isTradovate = normalizedHeaders.includes("symbol")
+    && (normalizedHeaders.includes("side") || normalizedHeaders.includes("buysell") || normalizedHeaders.includes("action"))
+    && (normalizedHeaders.includes("avgeentryprice") || normalizedHeaders.includes("avgentryprice") || normalizedHeaders.includes("entryprice"))
+    && (normalizedHeaders.includes("avgexitprice") || normalizedHeaders.includes("exitprice"))
+    && (normalizedHeaders.includes("profitloss") || normalizedHeaders.includes("pnl") || normalizedHeaders.includes("pl") || normalizedHeaders.includes("realizedpandl"));
+
   const hasRoundTripColumns = headers.some((h) => ["entryPrice", "Entry Price", "exitPrice", "Exit Price", "P&L", "pnl"].includes(h));
 
+  if (isTradovate) {
+    const trades = [];
+    let skipped = 0;
+
+    for (const r of rows) {
+      const symbol = get(r, ["Symbol", "symbol", "Instrument", "Contract"]).toUpperCase() || "UNKNOWN";
+      const sideRaw = get(r, ["Side", "BuySell", "B/S", "Action", "side", "buySell"]).toUpperCase();
+      const side = (sideRaw.includes("SELL") || sideRaw.includes("SHORT")) ? "SHORT" : "LONG";
+      const contracts = Math.max(1, Math.round(toNum(get(r, ["Qty", "Quantity", "Contracts", "qty"]), 1)));
+      const entryPrice = toNum(get(r, ["AvgEntryPrice", "AverageEntryPrice", "EntryPrice", "Entry Price"]), NaN);
+      const exitPrice = toNum(get(r, ["AvgExitPrice", "AverageExitPrice", "ExitPrice", "Exit Price"]), NaN);
+      const pnl = toNum(get(r, ["ProfitLoss", "PnL", "P&L", "NetProfit", "RealizedPnL"]), NaN);
+      const date = toIsoDate(get(r, ["Date", "TradeDate", "EntryTime", "ExitTime", "Opened", "Closed"]));
+      const entryTime = toClock(get(r, ["EntryTime", "Opened", "Open Time", "StartTime"]));
+      const exitTime = toClock(get(r, ["ExitTime", "Closed", "Close Time", "EndTime"])) || entryTime;
+
+      if (!date || !Number.isFinite(entryPrice) || !Number.isFinite(exitPrice) || !Number.isFinite(pnl)) {
+        skipped += 1;
+        continue;
+      }
+
+      const ticks = Number.isFinite(entryPrice) && Number.isFinite(exitPrice)
+        ? Number(((side === "LONG" ? exitPrice - entryPrice : entryPrice - exitPrice) * contracts).toFixed(2))
+        : 0;
+
+      const trade = {
+        id: "",
+        date,
+        symbol,
+        side,
+        contracts,
+        entryTime,
+        exitTime,
+        entryPrice,
+        exitPrice,
+        pnl,
+        ticks,
+        duration: "—",
+        win: pnl > 0,
+      };
+      trade.id = makeTradeId(trade);
+      trades.push(trade);
+    }
+
+    return trades.length
+      ? { trades, skipped }
+      : { trades: [], skipped, error: "Could not recognize Tradovate CSV columns." };
+  }
+
   if (hasRoundTripColumns) {
-    return rows.map((r, i) => {
+    const trades = rows.map((r) => {
       const symbol     = get(r, ["symbol", "Symbol", "instrument", "Instrument", "Contract"]) || "UNKNOWN";
       const rawSide    = get(r, ["side", "Side", "action", "Action", "B/S"]).toUpperCase();
       const side       = rawSide.includes("SELL") || rawSide.includes("SHORT") ? "SHORT" : "LONG";
@@ -185,11 +296,14 @@ function parseCSV(text) {
       const exitPrice  = toNum(get(r, ["exitPrice", "exit_price", "Exit Price"]));
       const contracts  = Math.max(1, Math.round(toNum(get(r, ["contracts", "qty", "Qty", "Quantity"]), 1)));
       const stamp      = get(r, ["Timestamp", "timestamp", "_timestamp"]);
-      const date       = get(r, ["date", "Date", "_tradeDate"]) || toIsoDate(stamp || new Date());
+      const date       = get(r, ["date", "Date", "_tradeDate"]) || toIsoDate(stamp || new Date()) || new Date().toISOString().slice(0, 10);
       const entryTime  = get(r, ["entryTime", "entry_time", "Entry Time"]) || toClock(stamp || new Date());
       const exitTime   = get(r, ["exitTime", "exit_time", "Exit Time"]) || entryTime;
-      return { id:`imp_${i}`, date, symbol, side, contracts, entryTime, exitTime, entryPrice, exitPrice, pnl, ticks:0, duration:"—", win: pnl > 0 };
+      const trade = { id:"", date, symbol, side, contracts, entryTime, exitTime, entryPrice, exitPrice, pnl, ticks:0, duration:"—", win: pnl > 0 };
+      trade.id = makeTradeId(trade);
+      return trade;
     });
+    return { trades, skipped: 0 };
   }
 
   const fills = rows.map((r, i) => {
@@ -247,7 +361,7 @@ function parseCSV(text) {
     openByKey.set(key, open);
   }
 
-  return trades;
+  return { trades, skipped: 0 };
 }
 
 // ─── SHARED UI ────────────────────────────────────────────────────────────────
@@ -290,13 +404,19 @@ const Btn = ({ children, onClick, variant="default", style:sx={}, ...rest }) => 
 function ImportModal({ onClose, onImport }) {
   const [dragging, setDragging] = useState(false);
   const [parsed,   setParsed]   = useState(null);
+  const [error,    setError]    = useState("");
   const fileRef = useRef();
 
   const handleFile = file => {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = e => {
-      try { setParsed(parseCSV(e.target.result)); }
+      try {
+        setError("");
+        const result = parseCSV(e.target.result);
+        setParsed(result);
+        if (result.error) setError(result.error);
+      }
       catch { alert("Could not parse file — make sure it's a CSV with headers."); }
     };
     reader.readAsText(file);
@@ -320,15 +440,19 @@ function ImportModal({ onClose, onImport }) {
         </div>
         {parsed ? (
           <div>
-            <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--green)", marginBottom:10 }}>✓ Found {parsed.length} trades</div>
+            <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:parsed.trades.length ? "var(--green)" : "#ff8a80", marginBottom:10 }}>
+              {parsed.trades.length
+                ? `✓ Imported ${parsed.trades.length} trades${parsed.skipped ? `, skipped ${parsed.skipped} invalid rows` : ""}`
+                : (error || "Could not recognize Tradovate CSV columns.")}
+            </div>
             <div style={{ background:"var(--surface2)", borderRadius:8, padding:12, fontSize:11, fontFamily:"var(--font-mono)", marginBottom:16, maxHeight:120, overflowY:"auto" }}>
-              {parsed.slice(0,4).map((t,i)=>(
+              {parsed.trades.slice(0,4).map((t,i)=>(
                 <div key={i} style={{ marginBottom:4, color:"var(--text)" }}>{t.date} · {t.symbol} · {t.side} · {fmt(t.pnl,1)}</div>
               ))}
-              {parsed.length > 4 && <div style={{ color:"var(--muted)" }}>… and {parsed.length-4} more</div>}
+              {parsed.trades.length > 4 && <div style={{ color:"var(--muted)" }}>… and {parsed.trades.length-4} more</div>}
             </div>
             <div style={{ display:"flex", gap:10 }}>
-              <Btn variant="primary" onClick={()=>{onImport(parsed);onClose();}}>Import {parsed.length} Trades</Btn>
+              <Btn variant="primary" onClick={()=>{onImport(parsed.trades);onClose();}} disabled={!parsed.trades.length}>Import {parsed.trades.length} Trades</Btn>
               <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
             </div>
           </div>
@@ -1174,6 +1298,40 @@ const toJournalDate = d => {
 };
 const fmtJournalDate = d => toJournalDate(d).toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric" });
 
+const INSTRUMENT_SPECS = {
+  MGC: { tickSize: 0.10, tickValue: 1.00, hint: "MGC: $10/point, 0.10 tick" },
+  MNQ: { tickSize: 0.25, tickValue: 0.50, hint: "MNQ: $2/point, 0.25 tick" },
+};
+
+const getInstrumentSpec = (symbol) => {
+  const normalized = String(symbol || "").trim().toUpperCase();
+  if (normalized.startsWith("MGC")) return INSTRUMENT_SPECS.MGC;
+  if (normalized.startsWith("MNQ")) return INSTRUMENT_SPECS.MNQ;
+  return null;
+};
+
+const deriveManualPnlAndTicks = ({ symbol, side, entryPrice, exitPrice, contracts, explicitPnl }) => {
+  const spec = getInstrumentSpec(symbol);
+
+  let ticks = 0;
+  if (spec) {
+    const direction = side === "SHORT" ? -1 : 1;
+    const signedPoints = (exitPrice - entryPrice) * direction;
+    const ticksRaw = signedPoints / spec.tickSize;
+    ticks = Number.isFinite(ticksRaw) ? Math.round(ticksRaw) : 0;
+  }
+
+  if (explicitPnl != null && String(explicitPnl).trim() !== "") {
+    const pnl = Number(explicitPnl);
+    return { pnl: Number.isFinite(pnl) ? pnl : 0, ticks };
+  }
+
+  if (!spec) return { pnl: 0, ticks: 0 };
+
+  const pnl = ticks * spec.tickValue * contracts;
+  return { pnl: Number(pnl.toFixed(2)), ticks };
+};
+
 function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayMeta, setDayMeta }) {
   const [selectedDayId, setSelectedDayId] = useState("");
   const [editingTrade, setEditingTrade] = useState(null);
@@ -1373,7 +1531,7 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
                         <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.contracts}</td>
                         <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.entryPrice}</td>
                         <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.exitPrice}</td>
-                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)", color:t.pnl>=0?"var(--green)":"var(--red)", fontWeight:700 }}>{fmt(t.pnl,2)}</td>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)", color:Number(t.pnl||0)>=0?"var(--green)":"var(--red)", fontWeight:700 }}>{fmt(Number(t.pnl||0),2)}</td>
                         <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>
                           <button type="button" onClick={(e)=>{e.stopPropagation(); setEditingTrade(makeDraftFromTrade(t));}} style={{ background:"transparent", border:"none", color:"var(--blue)", marginRight:8 }}>Edit</button>
                           <button type="button" onClick={(e)=>{e.stopPropagation(); onDeleteTrade(t.id);}} style={{ background:"transparent", border:"none", color:"var(--red)" }}>Delete</button>
@@ -1387,6 +1545,11 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
 
             {editingTrade && (
               <div style={{ marginTop:12, border:"1px solid var(--border)", borderRadius:8, padding:12, display:"grid", gridTemplateColumns:"repeat(7,minmax(0,1fr))", gap:8 }}>
+                {getInstrumentSpec(editingTrade.symbol) && (
+                  <div style={{ gridColumn:"1 / -1", fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)" }}>
+                    {getInstrumentSpec(editingTrade.symbol).hint}
+                  </div>
+                )}
                 {[["time","Time"],["symbol","Symbol"],["side","Side"],["qty","Qty"],["entry","Entry"],["exit","Exit"],["pnl","P&L"]].map(([k,l])=>(
                   <label key={k} style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", display:"flex", flexDirection:"column", gap:4 }}>
                     {l}
@@ -1395,19 +1558,30 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
                 ))}
                 <div style={{ gridColumn:"1 / -1", display:"flex", gap:8 }}>
                   <Btn onClick={()=>{
-                    const pnl = Number(editingTrade.pnl||0);
+                    const side = editingTrade.side || "LONG";
+                    const contracts = Math.max(1, Number(editingTrade.qty||1));
+                    const entryPrice = Number(editingTrade.entry||0);
+                    const exitPrice = Number(editingTrade.exit||0);
+                    const { pnl, ticks } = deriveManualPnlAndTicks({
+                      symbol: editingTrade.symbol,
+                      side,
+                      entryPrice,
+                      exitPrice,
+                      contracts,
+                      explicitPnl: editingTrade.pnl,
+                    });
                     const trade = {
                       id: editingTrade.id,
                       date: selectedDate,
                       symbol: editingTrade.symbol,
-                      side: editingTrade.side || "LONG",
-                      contracts: Number(editingTrade.qty||1),
+                      side,
+                      contracts,
                       entryTime: `${editingTrade.time || "00:00"}:00`,
                       exitTime: `${editingTrade.time || "00:00"}:00`,
-                      entryPrice: Number(editingTrade.entry||0),
-                      exitPrice: Number(editingTrade.exit||0),
+                      entryPrice,
+                      exitPrice,
                       pnl,
-                      ticks: 0,
+                      ticks,
                       duration: "—",
                       win: pnl > 0,
                     };
