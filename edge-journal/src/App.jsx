@@ -1298,6 +1298,40 @@ const toJournalDate = d => {
 };
 const fmtJournalDate = d => toJournalDate(d).toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric" });
 
+const INSTRUMENT_SPECS = {
+  MGC: { tickSize: 0.10, tickValue: 1.00, hint: "MGC: $10/point, 0.10 tick" },
+  MNQ: { tickSize: 0.25, tickValue: 0.50, hint: "MNQ: $2/point, 0.25 tick" },
+};
+
+const getInstrumentSpec = (symbol) => {
+  const normalized = String(symbol || "").trim().toUpperCase();
+  if (normalized.startsWith("MGC")) return INSTRUMENT_SPECS.MGC;
+  if (normalized.startsWith("MNQ")) return INSTRUMENT_SPECS.MNQ;
+  return null;
+};
+
+const deriveManualPnlAndTicks = ({ symbol, side, entryPrice, exitPrice, contracts, explicitPnl }) => {
+  const spec = getInstrumentSpec(symbol);
+
+  let ticks = 0;
+  if (spec) {
+    const direction = side === "SHORT" ? -1 : 1;
+    const signedPoints = (exitPrice - entryPrice) * direction;
+    const ticksRaw = signedPoints / spec.tickSize;
+    ticks = Number.isFinite(ticksRaw) ? Math.round(ticksRaw) : 0;
+  }
+
+  if (explicitPnl != null && String(explicitPnl).trim() !== "") {
+    const pnl = Number(explicitPnl);
+    return { pnl: Number.isFinite(pnl) ? pnl : 0, ticks };
+  }
+
+  if (!spec) return { pnl: 0, ticks: 0 };
+
+  const pnl = ticks * spec.tickValue * contracts;
+  return { pnl: Number(pnl.toFixed(2)), ticks };
+};
+
 function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayMeta, setDayMeta }) {
   const [selectedDayId, setSelectedDayId] = useState("");
   const [editingTrade, setEditingTrade] = useState(null);
@@ -1497,7 +1531,7 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
                         <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.contracts}</td>
                         <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.entryPrice}</td>
                         <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.exitPrice}</td>
-                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)", color:t.pnl>=0?"var(--green)":"var(--red)", fontWeight:700 }}>{fmt(t.pnl,2)}</td>
+                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)", color:Number(t.pnl||0)>=0?"var(--green)":"var(--red)", fontWeight:700 }}>{fmt(Number(t.pnl||0),2)}</td>
                         <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>
                           <button type="button" onClick={(e)=>{e.stopPropagation(); setEditingTrade(makeDraftFromTrade(t));}} style={{ background:"transparent", border:"none", color:"var(--blue)", marginRight:8 }}>Edit</button>
                           <button type="button" onClick={(e)=>{e.stopPropagation(); onDeleteTrade(t.id);}} style={{ background:"transparent", border:"none", color:"var(--red)" }}>Delete</button>
@@ -1511,6 +1545,11 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
 
             {editingTrade && (
               <div style={{ marginTop:12, border:"1px solid var(--border)", borderRadius:8, padding:12, display:"grid", gridTemplateColumns:"repeat(7,minmax(0,1fr))", gap:8 }}>
+                {getInstrumentSpec(editingTrade.symbol) && (
+                  <div style={{ gridColumn:"1 / -1", fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)" }}>
+                    {getInstrumentSpec(editingTrade.symbol).hint}
+                  </div>
+                )}
                 {[["time","Time"],["symbol","Symbol"],["side","Side"],["qty","Qty"],["entry","Entry"],["exit","Exit"],["pnl","P&L"]].map(([k,l])=>(
                   <label key={k} style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", display:"flex", flexDirection:"column", gap:4 }}>
                     {l}
@@ -1519,19 +1558,30 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
                 ))}
                 <div style={{ gridColumn:"1 / -1", display:"flex", gap:8 }}>
                   <Btn onClick={()=>{
-                    const pnl = Number(editingTrade.pnl||0);
+                    const side = editingTrade.side || "LONG";
+                    const contracts = Math.max(1, Number(editingTrade.qty||1));
+                    const entryPrice = Number(editingTrade.entry||0);
+                    const exitPrice = Number(editingTrade.exit||0);
+                    const { pnl, ticks } = deriveManualPnlAndTicks({
+                      symbol: editingTrade.symbol,
+                      side,
+                      entryPrice,
+                      exitPrice,
+                      contracts,
+                      explicitPnl: editingTrade.pnl,
+                    });
                     const trade = {
                       id: editingTrade.id,
                       date: selectedDate,
                       symbol: editingTrade.symbol,
-                      side: editingTrade.side || "LONG",
-                      contracts: Number(editingTrade.qty||1),
+                      side,
+                      contracts,
                       entryTime: `${editingTrade.time || "00:00"}:00`,
                       exitTime: `${editingTrade.time || "00:00"}:00`,
-                      entryPrice: Number(editingTrade.entry||0),
-                      exitPrice: Number(editingTrade.exit||0),
+                      entryPrice,
+                      exitPrice,
                       pnl,
-                      ticks: 0,
+                      ticks,
                       duration: "—",
                       win: pnl > 0,
                     };
