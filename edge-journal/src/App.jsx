@@ -102,29 +102,152 @@ const rColor = (r) => {
 const isReviewed = (n) => !!(n?.grade || n?.setup?.trim());
 
 function parseCSV(text) {
-  const lines   = text.trim().split("\n");
-  const headers = lines[0].split(",").map(h => h.trim().replace(/"/g, ""));
-  return lines.slice(1)
-    .map(l => {
-      const vals = l.split(",").map(v => v.trim().replace(/"/g, ""));
-      const r = {};
-      headers.forEach((h, i) => { r[h] = vals[i]; });
-      return r;
-    })
-    .filter(r => r[headers[0]])
-    .map((r, i) => {
-      const symbol     = r.symbol    || r.Symbol    || r.instrument || r.Instrument || "UNKNOWN";
-      const rawSide    = (r.side     || r.Side      || r.action     || r.Action     || "LONG").toUpperCase();
+  const splitCSVLine = (line) => {
+    const cols = [];
+    let cur = "";
+    let quoted = false;
+    for (let i = 0; i < line.length; i += 1) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (quoted && line[i + 1] === '"') {
+          cur += '"';
+          i += 1;
+        } else {
+          quoted = !quoted;
+        }
+      } else if (ch === "," && !quoted) {
+        cols.push(cur.trim());
+        cur = "";
+      } else {
+        cur += ch;
+      }
+    }
+    cols.push(cur.trim());
+    return cols;
+  };
+
+  const toNum = (v, fallback = 0) => {
+    if (v == null || v === "") return fallback;
+    const s = String(v).replace(/[$,\s]/g, "");
+    const negParen = /^\(.*\)$/.test(s);
+    const n = parseFloat(s.replace(/[()]/g, ""));
+    if (!Number.isFinite(n)) return fallback;
+    return negParen ? -n : n;
+  };
+
+  const get = (row, keys) => {
+    for (const k of keys) {
+      if (row[k] != null && String(row[k]).trim() !== "") return String(row[k]).trim();
+    }
+    return "";
+  };
+
+  const toIsoDate = (value) => {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? new Date().toISOString().slice(0, 10) : d.toISOString().slice(0, 10);
+  };
+
+  const toClock = (value) => {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "00:00:00";
+    return d.toISOString().slice(11, 19);
+  };
+
+  const normalizeFillSide = (row) => {
+    const bs = get(row, ["B/S", "bs", "side", "Side"]);
+    if (bs) return bs.toUpperCase().includes("S") ? "SELL" : "BUY";
+    const action = get(row, ["_action", "action", "Action"]);
+    if (action === "1") return "SELL";
+    if (action === "0") return "BUY";
+    return "BUY";
+  };
+
+  const lines = text.split(/\r?\n/).filter(Boolean);
+  if (!lines.length) return [];
+  const headers = splitCSVLine(lines[0]).map((h) => h.replace(/"/g, "").trim());
+
+  const rows = lines.slice(1).map((line) => {
+    const vals = splitCSVLine(line).map((v) => v.replace(/"/g, ""));
+    const row = {};
+    headers.forEach((h, i) => { row[h] = vals[i] ?? ""; });
+    return row;
+  }).filter((r) => r[headers[0]]);
+
+  const hasRoundTripColumns = headers.some((h) => ["entryPrice", "Entry Price", "exitPrice", "Exit Price", "P&L", "pnl"].includes(h));
+
+  if (hasRoundTripColumns) {
+    return rows.map((r, i) => {
+      const symbol     = get(r, ["symbol", "Symbol", "instrument", "Instrument", "Contract"]) || "UNKNOWN";
+      const rawSide    = get(r, ["side", "Side", "action", "Action", "B/S"]).toUpperCase();
       const side       = rawSide.includes("SELL") || rawSide.includes("SHORT") ? "SHORT" : "LONG";
-      const pnl        = parseFloat(r.pnl       || r.PnL  || r["P&L"]       || r.profit || 0);
-      const entryPrice = parseFloat(r.entryPrice || r.entry_price || r["Entry Price"] || 0);
-      const exitPrice  = parseFloat(r.exitPrice  || r.exit_price  || r["Exit Price"]  || 0);
-      const contracts  = parseInt  (r.contracts  || r.qty         || r.Qty            || 1);
-      const date       = r.date || r.Date || new Date().toISOString().slice(0,10);
-      const entryTime  = r.entryTime || r.entry_time || r["Entry Time"] || "00:00:00";
-      const exitTime   = r.exitTime  || r.exit_time  || r["Exit Time"]  || "00:00:00";
+      const pnl        = toNum(get(r, ["pnl", "PnL", "P&L", "profit"]));
+      const entryPrice = toNum(get(r, ["entryPrice", "entry_price", "Entry Price"]));
+      const exitPrice  = toNum(get(r, ["exitPrice", "exit_price", "Exit Price"]));
+      const contracts  = Math.max(1, Math.round(toNum(get(r, ["contracts", "qty", "Qty", "Quantity"]), 1)));
+      const stamp      = get(r, ["Timestamp", "timestamp", "_timestamp"]);
+      const date       = get(r, ["date", "Date", "_tradeDate"]) || toIsoDate(stamp || new Date());
+      const entryTime  = get(r, ["entryTime", "entry_time", "Entry Time"]) || toClock(stamp || new Date());
+      const exitTime   = get(r, ["exitTime", "exit_time", "Exit Time"]) || entryTime;
       return { id:`imp_${i}`, date, symbol, side, contracts, entryTime, exitTime, entryPrice, exitPrice, pnl, ticks:0, duration:"—", win: pnl > 0 };
     });
+  }
+
+  const fills = rows.map((r, i) => {
+    const symbol = get(r, ["Contract", "symbol", "Symbol", "instrument", "Instrument"]) || "UNKNOWN";
+    const account = get(r, ["Account", "_accountId", "accountId"]);
+    const qty = Math.max(1, Math.round(toNum(get(r, ["Quantity", "_qty", "qty", "Qty"]), 1)));
+    const price = toNum(get(r, ["Price", "_price", "price"]));
+    const side = normalizeFillSide(r);
+    const stamp = get(r, ["Timestamp", "_timestamp", "timestamp"]);
+    const date = get(r, ["Date", "_tradeDate", "date"]) || toIsoDate(stamp || new Date());
+    const sec = Number.isNaN(new Date(stamp).getTime()) ? i : Math.floor(new Date(stamp).getTime() / 1000);
+    return { i, rowId: get(r, ["Fill ID", "_id", "id"]) || String(i), symbol, account, qty, price, side, stamp, date, sec };
+  }).filter((f) => Number.isFinite(f.price) && f.price > 0 && f.qty > 0);
+
+  fills.sort((a, b) => a.sec - b.sec || a.i - b.i);
+
+  const openByKey = new Map();
+  const trades = [];
+
+  for (const fill of fills) {
+    const key = `${fill.account}::${fill.symbol}`;
+    const open = openByKey.get(key) || [];
+    let remaining = fill.qty;
+
+    while (remaining > 0) {
+      const idxOpp = open.findIndex((lot) => lot.side !== fill.side && lot.qty > 0);
+      if (idxOpp === -1) break;
+      const lot = open[idxOpp];
+      const matched = Math.min(remaining, lot.qty);
+      const longTrade = lot.side === "BUY";
+      const entryPrice = lot.price;
+      const exitPrice = fill.price;
+      const pnl = longTrade ? (exitPrice - entryPrice) * matched : (entryPrice - exitPrice) * matched;
+      trades.push({
+        id: `imp_${lot.rowId}_${fill.rowId}_${trades.length}`,
+        date: toIsoDate(lot.stamp || fill.stamp || fill.date),
+        symbol: fill.symbol,
+        side: longTrade ? "LONG" : "SHORT",
+        contracts: matched,
+        entryTime: toClock(lot.stamp || fill.stamp),
+        exitTime: toClock(fill.stamp || lot.stamp),
+        entryPrice,
+        exitPrice,
+        pnl: Number(pnl.toFixed(2)),
+        ticks: 0,
+        duration: "—",
+        win: pnl > 0,
+      });
+      lot.qty -= matched;
+      remaining -= matched;
+      if (lot.qty <= 0) open.splice(idxOpp, 1);
+    }
+
+    if (remaining > 0) open.push({ ...fill, qty: remaining });
+    openByKey.set(key, open);
+  }
+
+  return trades;
 }
 
 // ─── SHARED UI ────────────────────────────────────────────────────────────────
