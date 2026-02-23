@@ -102,28 +102,48 @@ const rColor = (r) => {
 const isReviewed = (n) => !!(n?.grade || n?.setup?.trim());
 
 function parseCSV(text) {
-  const splitCSVLine = (line) => {
-    const cols = [];
+  const parseRows = (csvText) => {
+    const rows = [];
+    let row = [];
     let cur = "";
     let quoted = false;
-    for (let i = 0; i < line.length; i += 1) {
-      const ch = line[i];
+
+    for (let i = 0; i < csvText.length; i += 1) {
+      const ch = csvText[i];
+      const next = csvText[i + 1];
+
       if (ch === '"') {
-        if (quoted && line[i + 1] === '"') {
+        if (quoted && next === '"') {
           cur += '"';
           i += 1;
         } else {
           quoted = !quoted;
         }
-      } else if (ch === "," && !quoted) {
-        cols.push(cur.trim());
-        cur = "";
-      } else {
-        cur += ch;
+        continue;
       }
+
+      if (ch === "," && !quoted) {
+        row.push(cur.trim());
+        cur = "";
+        continue;
+      }
+
+      if ((ch === "\n" || ch === "\r") && !quoted) {
+        if (ch === "\r" && next === "\n") i += 1;
+        row.push(cur.trim());
+        const hasData = row.some((cell) => String(cell).trim() !== "");
+        if (hasData) rows.push(row);
+        row = [];
+        cur = "";
+        continue;
+      }
+
+      cur += ch;
     }
-    cols.push(cur.trim());
-    return cols;
+
+    row.push(cur.trim());
+    if (row.some((cell) => String(cell).trim() !== "")) rows.push(row);
+    return rows;
   };
 
   const toNum = (v, fallback = 0) => {
@@ -143,15 +163,51 @@ function parseCSV(text) {
   };
 
   const toIsoDate = (value) => {
-    const d = new Date(value);
-    return Number.isNaN(d.getTime()) ? new Date().toISOString().slice(0, 10) : d.toISOString().slice(0, 10);
+    const s = String(value || "").trim();
+    if (!s) return "";
+
+    const mdy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+    if (mdy) {
+      const mm = String(parseInt(mdy[1], 10)).padStart(2, "0");
+      const dd = String(parseInt(mdy[2], 10)).padStart(2, "0");
+      const yyyy = mdy[3].length === 2 ? `20${mdy[3]}` : mdy[3];
+      return `${yyyy}-${mm}-${dd}`;
+    }
+
+    const d = new Date(s);
+    return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
   };
 
   const toClock = (value) => {
-    const d = new Date(value);
+    const s = String(value || "").trim();
+    if (!s) return "00:00:00";
+
+    const explicit = s.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?/i);
+    if (explicit) {
+      let h = parseInt(explicit[1], 10);
+      const m = explicit[2];
+      const sec = explicit[3] || "00";
+      const ampm = (explicit[4] || "").toUpperCase();
+      if (ampm === "PM" && h < 12) h += 12;
+      if (ampm === "AM" && h === 12) h = 0;
+      return `${String(h).padStart(2, "0")}:${m}:${sec}`;
+    }
+
+    const d = new Date(s);
     if (Number.isNaN(d.getTime())) return "00:00:00";
     return d.toISOString().slice(11, 19);
   };
+
+  const makeTradeId = (trade) => [
+    trade.date,
+    trade.symbol,
+    trade.entryTime,
+    trade.exitTime,
+    trade.side,
+    Number(trade.entryPrice).toFixed(6),
+    Number(trade.exitPrice).toFixed(6),
+    trade.contracts,
+  ].join("_").replace(/\s+/g, "");
 
   const normalizeFillSide = (row) => {
     const bs = get(row, ["B/S", "bs", "side", "Side"]);
@@ -162,21 +218,76 @@ function parseCSV(text) {
     return "BUY";
   };
 
-  const lines = text.split(/\r?\n/).filter(Boolean);
-  if (!lines.length) return [];
-  const headers = splitCSVLine(lines[0]).map((h) => h.replace(/"/g, "").trim());
+  const parsedRows = parseRows(text || "");
+  if (!parsedRows.length) return { trades: [], skipped: 0, error: "Could not recognize Tradovate CSV columns." };
+  const headers = parsedRows[0].map((h) => h.replace(/"/g, "").trim());
 
-  const rows = lines.slice(1).map((line) => {
-    const vals = splitCSVLine(line).map((v) => v.replace(/"/g, ""));
+  const rows = parsedRows.slice(1).map((vals) => {
     const row = {};
     headers.forEach((h, i) => { row[h] = vals[i] ?? ""; });
     return row;
   }).filter((r) => r[headers[0]]);
 
+  const normalizedHeaders = headers.map((h) => h.toLowerCase().replace(/[^a-z0-9]/g, ""));
+  const isTradovate = normalizedHeaders.includes("symbol")
+    && (normalizedHeaders.includes("side") || normalizedHeaders.includes("buysell") || normalizedHeaders.includes("action"))
+    && (normalizedHeaders.includes("avgeentryprice") || normalizedHeaders.includes("avgentryprice") || normalizedHeaders.includes("entryprice"))
+    && (normalizedHeaders.includes("avgexitprice") || normalizedHeaders.includes("exitprice"))
+    && (normalizedHeaders.includes("profitloss") || normalizedHeaders.includes("pnl") || normalizedHeaders.includes("pl") || normalizedHeaders.includes("realizedpandl"));
+
   const hasRoundTripColumns = headers.some((h) => ["entryPrice", "Entry Price", "exitPrice", "Exit Price", "P&L", "pnl"].includes(h));
 
+  if (isTradovate) {
+    const trades = [];
+    let skipped = 0;
+
+    for (const r of rows) {
+      const symbol = get(r, ["Symbol", "symbol", "Instrument", "Contract"]).toUpperCase() || "UNKNOWN";
+      const sideRaw = get(r, ["Side", "BuySell", "B/S", "Action", "side", "buySell"]).toUpperCase();
+      const side = (sideRaw.includes("SELL") || sideRaw.includes("SHORT")) ? "SHORT" : "LONG";
+      const contracts = Math.max(1, Math.round(toNum(get(r, ["Qty", "Quantity", "Contracts", "qty"]), 1)));
+      const entryPrice = toNum(get(r, ["AvgEntryPrice", "AverageEntryPrice", "EntryPrice", "Entry Price"]), NaN);
+      const exitPrice = toNum(get(r, ["AvgExitPrice", "AverageExitPrice", "ExitPrice", "Exit Price"]), NaN);
+      const pnl = toNum(get(r, ["ProfitLoss", "PnL", "P&L", "NetProfit", "RealizedPnL"]), NaN);
+      const date = toIsoDate(get(r, ["Date", "TradeDate", "EntryTime", "ExitTime", "Opened", "Closed"]));
+      const entryTime = toClock(get(r, ["EntryTime", "Opened", "Open Time", "StartTime"]));
+      const exitTime = toClock(get(r, ["ExitTime", "Closed", "Close Time", "EndTime"])) || entryTime;
+
+      if (!date || !Number.isFinite(entryPrice) || !Number.isFinite(exitPrice) || !Number.isFinite(pnl)) {
+        skipped += 1;
+        continue;
+      }
+
+      const ticks = Number.isFinite(entryPrice) && Number.isFinite(exitPrice)
+        ? Number(((side === "LONG" ? exitPrice - entryPrice : entryPrice - exitPrice) * contracts).toFixed(2))
+        : 0;
+
+      const trade = {
+        id: "",
+        date,
+        symbol,
+        side,
+        contracts,
+        entryTime,
+        exitTime,
+        entryPrice,
+        exitPrice,
+        pnl,
+        ticks,
+        duration: "—",
+        win: pnl > 0,
+      };
+      trade.id = makeTradeId(trade);
+      trades.push(trade);
+    }
+
+    return trades.length
+      ? { trades, skipped }
+      : { trades: [], skipped, error: "Could not recognize Tradovate CSV columns." };
+  }
+
   if (hasRoundTripColumns) {
-    return rows.map((r, i) => {
+    const trades = rows.map((r) => {
       const symbol     = get(r, ["symbol", "Symbol", "instrument", "Instrument", "Contract"]) || "UNKNOWN";
       const rawSide    = get(r, ["side", "Side", "action", "Action", "B/S"]).toUpperCase();
       const side       = rawSide.includes("SELL") || rawSide.includes("SHORT") ? "SHORT" : "LONG";
@@ -185,11 +296,14 @@ function parseCSV(text) {
       const exitPrice  = toNum(get(r, ["exitPrice", "exit_price", "Exit Price"]));
       const contracts  = Math.max(1, Math.round(toNum(get(r, ["contracts", "qty", "Qty", "Quantity"]), 1)));
       const stamp      = get(r, ["Timestamp", "timestamp", "_timestamp"]);
-      const date       = get(r, ["date", "Date", "_tradeDate"]) || toIsoDate(stamp || new Date());
+      const date       = get(r, ["date", "Date", "_tradeDate"]) || toIsoDate(stamp || new Date()) || new Date().toISOString().slice(0, 10);
       const entryTime  = get(r, ["entryTime", "entry_time", "Entry Time"]) || toClock(stamp || new Date());
       const exitTime   = get(r, ["exitTime", "exit_time", "Exit Time"]) || entryTime;
-      return { id:`imp_${i}`, date, symbol, side, contracts, entryTime, exitTime, entryPrice, exitPrice, pnl, ticks:0, duration:"—", win: pnl > 0 };
+      const trade = { id:"", date, symbol, side, contracts, entryTime, exitTime, entryPrice, exitPrice, pnl, ticks:0, duration:"—", win: pnl > 0 };
+      trade.id = makeTradeId(trade);
+      return trade;
     });
+    return { trades, skipped: 0 };
   }
 
   const fills = rows.map((r, i) => {
@@ -247,7 +361,7 @@ function parseCSV(text) {
     openByKey.set(key, open);
   }
 
-  return trades;
+  return { trades, skipped: 0 };
 }
 
 // ─── SHARED UI ────────────────────────────────────────────────────────────────
@@ -290,13 +404,19 @@ const Btn = ({ children, onClick, variant="default", style:sx={}, ...rest }) => 
 function ImportModal({ onClose, onImport }) {
   const [dragging, setDragging] = useState(false);
   const [parsed,   setParsed]   = useState(null);
+  const [error,    setError]    = useState("");
   const fileRef = useRef();
 
   const handleFile = file => {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = e => {
-      try { setParsed(parseCSV(e.target.result)); }
+      try {
+        setError("");
+        const result = parseCSV(e.target.result);
+        setParsed(result);
+        if (result.error) setError(result.error);
+      }
       catch { alert("Could not parse file — make sure it's a CSV with headers."); }
     };
     reader.readAsText(file);
@@ -320,15 +440,19 @@ function ImportModal({ onClose, onImport }) {
         </div>
         {parsed ? (
           <div>
-            <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--green)", marginBottom:10 }}>✓ Found {parsed.length} trades</div>
+            <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:parsed.trades.length ? "var(--green)" : "#ff8a80", marginBottom:10 }}>
+              {parsed.trades.length
+                ? `✓ Imported ${parsed.trades.length} trades${parsed.skipped ? `, skipped ${parsed.skipped} invalid rows` : ""}`
+                : (error || "Could not recognize Tradovate CSV columns.")}
+            </div>
             <div style={{ background:"var(--surface2)", borderRadius:8, padding:12, fontSize:11, fontFamily:"var(--font-mono)", marginBottom:16, maxHeight:120, overflowY:"auto" }}>
-              {parsed.slice(0,4).map((t,i)=>(
+              {parsed.trades.slice(0,4).map((t,i)=>(
                 <div key={i} style={{ marginBottom:4, color:"var(--text)" }}>{t.date} · {t.symbol} · {t.side} · {fmt(t.pnl,1)}</div>
               ))}
-              {parsed.length > 4 && <div style={{ color:"var(--muted)" }}>… and {parsed.length-4} more</div>}
+              {parsed.trades.length > 4 && <div style={{ color:"var(--muted)" }}>… and {parsed.trades.length-4} more</div>}
             </div>
             <div style={{ display:"flex", gap:10 }}>
-              <Btn variant="primary" onClick={()=>{onImport(parsed);onClose();}}>Import {parsed.length} Trades</Btn>
+              <Btn variant="primary" onClick={()=>{onImport(parsed.trades);onClose();}} disabled={!parsed.trades.length}>Import {parsed.trades.length} Trades</Btn>
               <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
             </div>
           </div>
