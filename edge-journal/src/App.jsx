@@ -1475,6 +1475,9 @@ const RC_GRADE_OPTIONS = ["A+", "A", "B", "C", "D", "F"];
 const RC_GRADE_COLORS  = { "A+":"#00e5a0", A:"#00e5a0", B:"#3b9eff", C:"#f5c842", D:"#ff9a3b", F:"#ff4d6a" };
 const rcGradeClr = g => RC_GRADE_COLORS[g] || "var(--muted)";
 
+const RC_SETUP_CATEGORIES = ["ENTRY", "EXIT", "MARKET", "RISK", "OTHER"];
+const RC_SETUP_CATEGORY_COLORS = { "ENTRY":"#3b9eff", "EXIT":"#ff9a3b", "MARKET":"#00e5a0", "RISK":"#ff4d6a", "OTHER":"#5a7a9a" };
+
 const rcTextareaStyle = {
   width:"100%", background:"var(--surface2)", border:"1px solid var(--border)",
   borderRadius:6, color:"var(--text)", fontFamily:"var(--font-mono)", fontSize:13,
@@ -1565,6 +1568,19 @@ function JournalPage({ trades, onSelectTrade, onNavigateToTrade, onUpsertTrade, 
 
   const segments      = (rc.segments && rc.segments.length===5) ? rc.segments : RC_DEFAULT_SEGMENTS;
   const updateSegment = (idx, patch) => updateRC({ segments: segments.map((s,i) => i===idx ? { ...s, ...patch } : s) });
+
+  // Setup criteria
+  const setupCriteria = (rc.setupCriteria || []).filter(c => c && c.id && typeof c.text === "string");
+  const addSetupCriteria = (category, text) => {
+    if (!text.trim()) return;
+    updateRC({ setupCriteria: [...setupCriteria, { id:`setup_${Date.now()}`, category, text, checked:true }] });
+  };
+  const updateSetupCriteria = (id, patch) => updateRC({ setupCriteria: setupCriteria.map(c => c.id===id ? { ...c, ...patch } : c) });
+  const deleteSetupCriteria = id => updateRC({ setupCriteria: setupCriteria.filter(c => c.id!==id) });
+  const setupByCategory = RC_SETUP_CATEGORIES.reduce((acc, cat) => {
+    acc[cat] = setupCriteria.filter(c => c.category===cat);
+    return acc;
+  }, {});
 
   const applyFormat = cmd => { notesRef.current?.focus(); document.execCommand(cmd, false); };
 
@@ -1804,6 +1820,46 @@ function JournalPage({ trades, onSelectTrade, onNavigateToTrade, onUpsertTrade, 
               {/* Section 3 — Reminders */}
               <RCSection label="Reminders to Myself">
                 <textarea value={rc.reminders||""} onChange={e=>updateRC({reminders:e.target.value})} placeholder="e.g. Intraday time frame continuity — only take trades in the direction of the higher time frame trend." rows={3} style={rcTextareaStyle} />
+              </RCSection>
+
+              {/* Section 3.5 — Trade Setup Criteria */}
+              <RCSection label="Trade Setup Criteria">
+                <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+                  <input id="setup_input" type="text" placeholder="Enter criteria (e.g., 'Break of resistance')…" style={{ flex:1, background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:6, color:"var(--text)", fontFamily:"var(--font-mono)", fontSize:12, padding:"8px 10px", outline:"none" }} />
+                  <select id="setup_category" defaultValue="ENTRY" style={{ background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:6, color:"var(--text)", fontFamily:"var(--font-mono)", fontSize:12, padding:"8px 10px", outline:"none", minWidth:90 }}>
+                    {RC_SETUP_CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <button type="button" onClick={() => {
+                    const input = document.getElementById("setup_input");
+                    const select = document.getElementById("setup_category");
+                    if (input && select) {
+                      addSetupCriteria(select.value, input.value);
+                      input.value = "";
+                      input.focus();
+                    }
+                  }} style={{ background:"var(--green)", border:"none", borderRadius:6, color:"#000", fontFamily:"var(--font-mono)", fontSize:12, fontWeight:700, padding:"8px 14px", cursor:"pointer", whiteSpace:"nowrap" }}>+ Add</button>
+                </div>
+                {RC_SETUP_CATEGORIES.map(cat => {
+                  const items = setupByCategory[cat] || [];
+                  if (!items.length) return null;
+                  return (
+                    <div key={cat} style={{ marginBottom:12 }}>
+                      <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:RC_SETUP_CATEGORY_COLORS[cat], textTransform:"uppercase", letterSpacing:"0.1em", fontWeight:700, marginBottom:6 }}>{cat}</div>
+                      <div style={{ display:"flex", flexDirection:"column", gap:6, marginLeft:8, paddingLeft:12, borderLeft:`2px solid ${RC_SETUP_CATEGORY_COLORS[cat]}22` }}>
+                        {items.map(item => (
+                          <div key={item.id} style={{ display:"flex", alignItems:"center", gap:8 }}>
+                            <input type="checkbox" checked={item.checked!==false} onChange={e=>updateSetupCriteria(item.id,{checked:e.target.checked})} style={{ width:16, height:16, cursor:"pointer", accentColor:"var(--green)" }} />
+                            <div style={{ flex:1, color:item.checked!==false?"var(--text)":"var(--muted)", textDecoration:item.checked===false?"line-through":"none", fontFamily:"var(--font-mono)", fontSize:12 }}>{item.text}</div>
+                            <button type="button" onClick={() => deleteSetupCriteria(item.id)} style={{ background:"transparent", border:"none", color:"var(--red)", fontFamily:"var(--font-mono)", fontSize:11, cursor:"pointer" }}>Delete</button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+                {setupCriteria.length === 0 && (
+                  <div style={{ color:"var(--muted)", fontFamily:"var(--font-mono)", fontSize:12, fontStyle:"italic" }}>No setup criteria defined yet. Add entry, exit, market, or risk criteria above.</div>
+                )}
               </RCSection>
 
               {/* Section 4 — Session Segments */}
