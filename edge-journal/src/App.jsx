@@ -417,7 +417,7 @@ const Chip = ({ children, color="var(--muted)" }) => (
 
 const StatCard = ({ label, value, sub, color, delay="0s", big }) => (
   <div className="fade-up" style={{ animationDelay:delay, background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px" }}>
-    <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>{label}</div>
+    <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--dim)", letterSpacing:"0.12em", marginBottom:6, textTransform:"uppercase" }}>{label}</div>
     <div style={{ fontFamily:"var(--font-display)", fontSize:big?32:24, fontWeight:700, color:color||"var(--text)", lineHeight:1 }}>{value}</div>
     {sub && <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:6 }}>{sub}</div>}
   </div>
@@ -774,25 +774,67 @@ function Dashboard({ trades, notes, dayMeta, setDayMeta, onSelectTrade }) {
       </div>
 
       <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:12 }}>
-        <div className="fade-up" style={{ animationDelay:"0.05s", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px" }}><div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>AVG R-MULTIPLE</div><div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:s.avgR!=null?rColor(s.avgR):"var(--dim)", lineHeight:1 }}>{s.avgR!=null ? fmtR(s.avgR) : "—"}</div><div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:6 }}>{s.rCount > 0 ? `${s.rCount} trades with 1R set` : "Set 1R in trade detail to track"}</div></div>
-        <div className="fade-up" style={{ animationDelay:"0.08s", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px" }}><div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>TOTAL R EARNED</div><div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:s.totalR!=null&&s.totalR>=0?"var(--green)":s.totalR!=null?"var(--red)":"var(--dim)", lineHeight:1 }}>{s.totalR!=null ? fmtR(s.totalR) : "—"}</div><div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:6 }}>across {s.rCount} graded trades</div></div>
-        <div className="fade-up" style={{ animationDelay:"0.11s", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px" }}><div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>REVIEWED</div><div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:"var(--green)", lineHeight:1 }}>{s.reviewed}<span style={{ fontSize:14, color:"var(--muted)", fontWeight:400 }}>/{s.tCount}</span></div></div>
-        <div className="fade-up" style={{ animationDelay:"0.14s", background:"var(--surface)", border:`1px solid ${s.unreviewed>0?"var(--gold)40":"var(--border)"}`, borderRadius:10, padding:"18px 20px" }}><div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8 }}>NEEDS REVIEW</div><div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:s.unreviewed>0?"var(--gold)":"var(--green)", lineHeight:1 }}>{s.unreviewed}</div></div>
+        {/* AVG R-MULTIPLE — muted when no data */}
+        <div className="fade-up" style={{ animationDelay:"0.05s", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px", opacity:s.rCount>0?1:0.45, transition:"opacity 0.2s" }}>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--dim)", letterSpacing:"0.12em", marginBottom:6, textTransform:"uppercase" }}>Avg R-Multiple</div>
+          <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:s.avgR!=null?rColor(s.avgR):"var(--dim)", lineHeight:1 }}>{s.avgR!=null ? fmtR(s.avgR) : "—"}</div>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:6 }}>{s.rCount > 0 ? `${s.rCount} trades with 1R set` : "Set 1R in trade detail to track"}</div>
+        </div>
+        {/* TOTAL R EARNED — muted when no data */}
+        <div className="fade-up" style={{ animationDelay:"0.08s", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px", opacity:s.rCount>0?1:0.45, transition:"opacity 0.2s" }}>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--dim)", letterSpacing:"0.12em", marginBottom:6, textTransform:"uppercase" }}>Total R Earned</div>
+          <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:s.totalR!=null&&s.totalR>=0?"var(--green)":s.totalR!=null?"var(--red)":"var(--dim)", lineHeight:1 }}>{s.totalR!=null ? fmtR(s.totalR) : "—"}</div>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginTop:6 }}>across {s.rCount} graded trades</div>
+        </div>
+        {/* REVIEWED */}
+        <div className="fade-up" style={{ animationDelay:"0.11s", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"18px 20px" }}>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--dim)", letterSpacing:"0.12em", marginBottom:6, textTransform:"uppercase" }}>Reviewed</div>
+          <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:"var(--green)", lineHeight:1 }}>{s.reviewed}<span style={{ fontSize:14, color:"var(--muted)", fontWeight:400 }}>/{s.tCount}</span></div>
+        </div>
+        {/* NEEDS REVIEW — circular progress ring */}
+        <div className="fade-up" style={{ animationDelay:"0.14s", background:"var(--surface)", border:`1px solid ${s.unreviewed>0?"var(--gold)40":"var(--border)"}`, borderRadius:10, padding:"18px 20px", display:"flex", alignItems:"center", gap:14 }}>
+          <div>
+            <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--dim)", letterSpacing:"0.12em", marginBottom:6, textTransform:"uppercase" }}>Needs Review</div>
+            <div style={{ fontFamily:"var(--font-display)", fontSize:22, fontWeight:700, color:s.unreviewed>0?"var(--gold)":"var(--green)", lineHeight:1 }}>{s.unreviewed} left</div>
+          </div>
+          {(() => {
+            const ring = s.tCount > 0 ? s.reviewed / s.tCount : 0;
+            const r = 18; const circ = 2 * Math.PI * r;
+            return (
+              <svg width={44} height={44} style={{ flexShrink:0 }}>
+                <circle cx={22} cy={22} r={r} fill="none" stroke="var(--border2)" strokeWidth={3}/>
+                <circle cx={22} cy={22} r={r} fill="none" stroke={ring===1?"var(--green)":"var(--gold)"} strokeWidth={3}
+                  strokeDasharray={circ} strokeDashoffset={circ*(1-ring)}
+                  transform="rotate(-90 22 22)" strokeLinecap="round"/>
+                <text x={22} y={26} textAnchor="middle" fill="var(--text)" fontSize={9} fontFamily="var(--font-mono)" fontWeight="600">{s.reviewed}/{s.tCount}</text>
+              </svg>
+            );
+          })()}
+        </div>
       </div>
 
       <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr", gap:12, marginBottom:12 }}>
         <div style={{ display:"grid", gap:12 }}>
           <div className="fade-up-2" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"20px 20px 12px" }}>
             <SectionTitle title="Equity Curve" />
-            <ResponsiveContainer width="100%" height={180}>
-              <AreaChart data={s.curve} margin={{top:4,right:4,bottom:0,left:-20}}>
-                <defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#00e5a0" stopOpacity={0.2}/><stop offset="95%" stopColor="#00e5a0" stopOpacity={0}/></linearGradient></defs>
-                <XAxis dataKey="date" tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
-                <YAxis tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
-                <Tooltip content={<TT/>}/><ReferenceLine y={0} stroke="var(--border2)" strokeDasharray="3 3"/>
-                <Area type="monotone" dataKey="cum" stroke="#00e5a0" strokeWidth={2} fill="url(#g1)" dot={{fill:"#00e5a0",r:4}}/>
-              </AreaChart>
-            </ResponsiveContainer>
+            {(() => {
+              const yVals = s.curve.map(d=>d.cum);
+              const yMin  = yVals.length ? Math.min(...yVals) : 0;
+              const yMax  = yVals.length ? Math.max(...yVals) : 100;
+              const yPad  = Math.max((yMax - yMin) * 0.14, 30);
+              const domain = [Math.floor(yMin - yPad), Math.ceil(yMax + yPad)];
+              return (
+                <ResponsiveContainer width="100%" height={180}>
+                  <AreaChart data={s.curve} margin={{top:4,right:4,bottom:0,left:-20}}>
+                    <defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#00e5a0" stopOpacity={0.2}/><stop offset="95%" stopColor="#00e5a0" stopOpacity={0}/></linearGradient></defs>
+                    <XAxis dataKey="date" tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
+                    <YAxis domain={domain} tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
+                    <Tooltip content={<TT/>}/><ReferenceLine y={0} stroke="var(--border2)" strokeDasharray="3 3"/>
+                    <Area type="monotone" dataKey="cum" stroke="#00e5a0" strokeWidth={2} fill="url(#g1)" dot={{fill:"#00e5a0",r:4}} activeDot={{r:6,stroke:"#00e5a0",strokeWidth:2,fill:"var(--surface)"}}/>
+                  </AreaChart>
+                </ResponsiveContainer>
+              );
+            })()}
           </div>
           <div className="fade-up-3" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:20 }}>
             <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:16 }}><span aria-hidden="true" style={{ fontSize:12, lineHeight:1 }}>📅</span><div style={{ fontFamily:"var(--font-display)", fontSize:12, fontWeight:700, color:"var(--muted)", letterSpacing:"0.12em", textTransform:"uppercase" }}>Calendar</div></div>
@@ -1016,27 +1058,60 @@ function TradeDetailPage({ trades, selectedDayId, selectedTradeId, onBack, dayMe
 }
 
 // ─── TRADE LOG ────────────────────────────────────────────────────────────────
-function TradeLog({ trades, notes, playbooks, onSelect, onImport }) {
-  const [fSide,     setFSide]     = useState("all");
-  const [fSym,      setFSym]      = useState("all");
-  const [fDate,     setFDate]     = useState("all");
-  const [fReviewed, setFReviewed] = useState("all"); // "all" | "reviewed" | "unreviewed"
-  const [modal,     setModal]     = useState(false);
+function TradeLog({ trades, notes, playbooks, onSelect, onImport, onDeleteAll }) {
+  const [fSide,          setFSide]          = useState("all");
+  const [fSym,           setFSym]           = useState("all");
+  const [fDate,          setFDate]          = useState("all");
+  const [fReviewed,      setFReviewed]      = useState("all");
+  const [modal,          setModal]          = useState(false);
+  const [confirmDelete,  setConfirmDelete]  = useState(false);
+  const [sortBy,         setSortBy]         = useState(null);   // 'date' | 'symbol' | 'pnl'
+  const [sortDir,        setSortDir]        = useState("desc");
 
   const symbols = [...new Set(trades.map(t=>t.symbol))];
   const dates   = [...new Set(trades.map(t=>t.date))].sort();
 
-  const filtered = trades.filter(t => {
-    const rev = isReviewed(notes[t.id]);
-    return (
-      (fSide==="all"      || t.side===fSide) &&
-      (fSym ==="all"      || t.symbol===fSym) &&
-      (fDate==="all"      || t.date===fDate) &&
-      (fReviewed==="all"  || (fReviewed==="reviewed" ? rev : !rev))
-    );
-  });
+  const filtered = useMemo(() => {
+    const base = trades.filter(t => {
+      const rev = isReviewed(notes[t.id]);
+      return (
+        (fSide==="all"      || t.side===fSide) &&
+        (fSym ==="all"      || t.symbol===fSym) &&
+        (fDate==="all"      || t.date===fDate) &&
+        (fReviewed==="all"  || (fReviewed==="reviewed" ? rev : !rev))
+      );
+    });
+    if (!sortBy) return base;
+    return [...base].sort((a, b) => {
+      const av = sortBy === "pnl" ? a.pnl : sortBy === "symbol" ? a.symbol : a.date;
+      const bv = sortBy === "pnl" ? b.pnl : sortBy === "symbol" ? b.symbol : b.date;
+      if (av < bv) return sortDir === "asc" ? -1 : 1;
+      if (av > bv) return sortDir === "asc" ?  1 : -1;
+      return 0;
+    });
+  }, [trades, notes, fSide, fSym, fDate, fReviewed, sortBy, sortDir]);
 
   const unreviewedCount = trades.filter(t=>!isReviewed(notes[t.id])).length;
+  const hasAnyR = filtered.some(t => calcR(t.pnl, notes[t.id]?.risk1R) !== null);
+
+  const toggleSort = (col) => {
+    if (sortBy === col) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortBy(col); setSortDir("desc"); }
+  };
+
+  const SortHd = ({ label, col }) => {
+    const active = sortBy === col;
+    return (
+      <div onClick={() => toggleSort(col)} style={{ fontFamily:"var(--font-mono)", fontSize:9, color:active?"var(--blue)":"var(--muted)", letterSpacing:"0.08em", fontWeight:700, cursor:"pointer", userSelect:"none", display:"flex", alignItems:"center", gap:2 }}>
+        {label}
+        <span style={{ fontSize:8, opacity:active?1:0.35 }}>{active ? (sortDir==="asc" ? "↑" : "↓") : "↕"}</span>
+      </div>
+    );
+  };
+
+  const gridCols = hasAnyR
+    ? "80px 90px 64px 50px 90px 90px 86px 86px 112px 56px 72px 60px 54px"
+    : "80px 90px 64px 50px 90px 90px 86px 86px 112px 72px 60px 54px";
 
   // Show empty state if no trades yet
   if (trades.length === 0) {
@@ -1047,7 +1122,7 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport }) {
           <div style={{ fontSize:56, opacity:0.5 }}>📊</div>
           <div>
             <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, marginBottom:8 }}>No trades yet</div>
-            <div style={{ fontFamily:"var(--font-mono)", fontSize:12, color:"var(--muted)", marginBottom:24, maxWidth:400 }}>Import your Tradovate CSV to get started. Your trades will appear here with P&L analysis and review tracking.</div>
+            <div style={{ fontFamily:"var(--font-mono)", fontSize:12, color:"var(--muted)", marginBottom:24, maxWidth:400 }}>Import your Tradovate CSV to get started. Your trades will appear here with P&amp;L analysis and review tracking.</div>
             <Btn variant="primary" onClick={()=>setModal(true)}>⬆ Import CSV</Btn>
           </div>
         </div>
@@ -1059,10 +1134,38 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport }) {
     <div>
       {modal && <ImportModal onClose={()=>setModal(false)} onImport={onImport}/>}
 
+      {/* Delete All confirmation modal */}
+      {confirmDelete && (
+        <div style={{ position:"fixed", inset:0, background:"#000c", zIndex:2000, display:"flex", alignItems:"center", justifyContent:"center" }} onClick={()=>setConfirmDelete(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:"var(--surface)", border:"1px solid var(--border2)", borderRadius:14, padding:"32px 36px", width:420, textAlign:"center" }}>
+            <div style={{ fontSize:36, marginBottom:16 }}>🗑</div>
+            <div style={{ fontFamily:"var(--font-display)", fontSize:18, fontWeight:700, marginBottom:10 }}>Delete All Trades?</div>
+            <div style={{ fontFamily:"var(--font-mono)", fontSize:12, color:"var(--muted)", marginBottom:28, lineHeight:1.6 }}>
+              Are you sure you want to delete all trades?<br/>This action cannot be undone.
+            </div>
+            <div style={{ display:"flex", gap:10, justifyContent:"center" }}>
+              <button onClick={()=>{ onDeleteAll(); setConfirmDelete(false); }} style={{ background:"var(--red)", border:"1px solid var(--red)", color:"#fff", padding:"10px 22px", borderRadius:8, fontSize:13, fontWeight:700, fontFamily:"var(--font-mono)", cursor:"pointer" }}>
+                Yes, Delete All
+              </button>
+              <button onClick={()=>setConfirmDelete(false)} style={{ background:"transparent", border:"1px solid var(--border2)", color:"var(--muted)", padding:"10px 22px", borderRadius:8, fontSize:13, fontFamily:"var(--font-mono)", cursor:"pointer" }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Filters */}
       <div style={{ display:"flex", gap:10, marginBottom:20, flexWrap:"wrap", alignItems:"center" }}>
         <Btn variant="primary" onClick={()=>setModal(true)}>⬆ Import CSV</Btn>
         <div style={{ flex:1 }}/>
+
+        {/* Delete All — prominent on right */}
+        <button onClick={()=>setConfirmDelete(true)} style={{ background:"transparent", border:"1px solid var(--red)77", color:"var(--red)", padding:"6px 14px", borderRadius:6, fontSize:11, fontFamily:"var(--font-mono)", fontWeight:700, cursor:"pointer", transition:"all 0.2s" }}
+          onMouseEnter={e=>{e.currentTarget.style.background="var(--red)15";e.currentTarget.style.borderColor="var(--red)";}}
+          onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor="var(--red)77";}}>
+          🗑 Delete All
+        </button>
 
         {/* Reviewed filter — most prominent */}
         <div style={{ display:"flex", gap:4, background:"var(--surface)", border:"1px solid var(--border)", borderRadius:8, padding:3 }}>
@@ -1071,20 +1174,20 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport }) {
             { v:"unreviewed", l:`Needs Review${unreviewedCount>0?` (${unreviewedCount})`:""}` },
             { v:"reviewed",   l:"Reviewed" },
           ].map(o=>(
-            <button key={o.v} onClick={()=>setFReviewed(o.v)} style={{ padding:"5px 12px", borderRadius:6, border:"none", background:fReviewed===o.v?(o.v==="unreviewed"?"var(--gold)22":"var(--surface3)"):"transparent", color:fReviewed===o.v?(o.v==="unreviewed"?"var(--gold)":"var(--text)"):"var(--muted)", fontSize:11, fontFamily:"var(--font-mono)", fontWeight:fReviewed===o.v?700:400, transition:"all 0.15s" }}>
+            <button key={o.v} onClick={()=>setFReviewed(o.v)} style={{ padding:"5px 12px", borderRadius:6, border:"none", background:fReviewed===o.v?(o.v==="unreviewed"?"var(--gold)22":"var(--surface3)"):"transparent", color:fReviewed===o.v?(o.v==="unreviewed"?"var(--gold)":"var(--text)"):"var(--muted)", fontSize:11, fontFamily:"var(--font-mono)", fontWeight:fReviewed===o.v?700:400, transition:"all 0.15s", cursor:"pointer" }}>
               {o.l}
             </button>
           ))}
         </div>
 
         {[{v:"all",l:"All"},{v:"LONG",l:"Long"},{v:"SHORT",l:"Short"}].map(o=>(
-          <button key={o.v} onClick={()=>setFSide(o.v)} style={{ background:fSide===o.v?"var(--surface3)":"var(--surface)", border:`1px solid ${fSide===o.v?"var(--border2)":"var(--border)"}`, color:fSide===o.v?"var(--text)":"var(--muted)", padding:"6px 14px", borderRadius:6, fontSize:11, fontFamily:"var(--font-mono)", fontWeight:600 }}>{o.l}</button>
+          <button key={o.v} onClick={()=>setFSide(o.v)} style={{ background:fSide===o.v?"var(--surface3)":"var(--surface)", border:`1px solid ${fSide===o.v?"var(--border2)":"var(--border)"}`, color:fSide===o.v?"var(--text)":"var(--muted)", padding:"6px 14px", borderRadius:6, fontSize:11, fontFamily:"var(--font-mono)", fontWeight:600, cursor:"pointer" }}>{o.l}</button>
         ))}
-        <select value={fSym} onChange={e=>setFSym(e.target.value)} style={{ background:"var(--surface)", border:"1px solid var(--border)", color:"var(--muted)", padding:"6px 12px", borderRadius:6, fontSize:11 }}>
+        <select value={fSym} onChange={e=>setFSym(e.target.value)} style={{ background:"var(--surface)", border:"1px solid var(--border)", color:"var(--muted)", padding:"6px 12px", borderRadius:6, fontSize:11, cursor:"pointer" }}>
           <option value="all">All Symbols</option>
           {symbols.map(s=><option key={s} value={s}>{s}</option>)}
         </select>
-        <select value={fDate} onChange={e=>setFDate(e.target.value)} style={{ background:"var(--surface)", border:"1px solid var(--border)", color:"var(--muted)", padding:"6px 12px", borderRadius:6, fontSize:11 }}>
+        <select value={fDate} onChange={e=>setFDate(e.target.value)} style={{ background:"var(--surface)", border:"1px solid var(--border)", color:"var(--muted)", padding:"6px 12px", borderRadius:6, fontSize:11, cursor:"pointer" }}>
           <option value="all">All Dates</option>
           {dates.map(d=><option key={d} value={d}>{d}</option>)}
         </select>
@@ -1092,8 +1195,15 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport }) {
 
       {/* Table */}
       <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, overflow:"hidden" }}>
-        <div style={{ display:"grid", gridTemplateColumns:"80px 90px 64px 50px 90px 90px 86px 86px 100px 56px 60px 60px 54px", padding:"10px 16px", borderBottom:"1px solid var(--border)", gap:0 }}>
-          {["DATE","SYMBOL","SIDE","QTY","ENTRY TIME","EXIT TIME","ENTRY $","EXIT $","P&L","R-MULT","STATUS","NOTES","GRADE"].map(h=>(
+        <div style={{ display:"grid", gridTemplateColumns:gridCols, padding:"10px 16px", borderBottom:"1px solid var(--border)", gap:0 }}>
+          <SortHd label="DATE"   col="date"   />
+          <SortHd label="SYMBOL" col="symbol" />
+          {["SIDE","QTY","ENTRY TIME","EXIT TIME","ENTRY $","EXIT $"].map(h=>(
+            <div key={h} style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.08em", fontWeight:700 }}>{h}</div>
+          ))}
+          <SortHd label="P&L" col="pnl" />
+          {hasAnyR && <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.08em", fontWeight:700 }}>R-MULT</div>}
+          {["STATUS","NOTES","GRADE"].map(h=>(
             <div key={h} style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.08em", fontWeight:700 }}>{h}</div>
           ))}
         </div>
@@ -1109,7 +1219,7 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport }) {
           const rVal   = calcR(t.pnl, n.risk1R);
           const mistakes = n.mistakes||[];
           return (
-            <div key={t.id} className="hover-row" onClick={()=>onSelect(t)} style={{ display:"grid", gridTemplateColumns:"80px 90px 64px 50px 90px 90px 86px 86px 100px 56px 60px 60px 54px", padding:"11px 16px", borderBottom:"1px solid var(--border)", gap:0, alignItems:"center", cursor:"pointer", background:!t.win?"#ff4d6a05":"transparent", transition:"background 0.1s" }}>
+            <div key={t.id} className="hover-row" onClick={()=>onSelect(t)} style={{ display:"grid", gridTemplateColumns:gridCols, padding:"11px 16px", borderBottom:"1px solid var(--border)", gap:0, alignItems:"center", cursor:"pointer", background:!t.win?"#ff4d6a05":"transparent", transition:"background 0.1s" }}>
               <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)" }}>{t.date.slice(5)}</span>
               <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:600 }}>{t.symbol}</span>
               <Chip color={sideColor(t.side)}>{t.side==="LONG"?"▲L":"▼S"}</Chip>
@@ -1119,8 +1229,12 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport }) {
               <span style={{ fontFamily:"var(--font-mono)", fontSize:11 }}>{t.entryPrice}</span>
               <span style={{ fontFamily:"var(--font-mono)", fontSize:11 }}>{t.exitPrice}</span>
               <span style={{ fontFamily:"var(--font-mono)", fontSize:13, fontWeight:700, color:t.pnl>=0?"var(--green)":"var(--red)" }}>{fmt(t.pnl,1)}</span>
-              <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:700, color:rColor(rVal) }}>{fmtR(rVal)}</span>
-              <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:rev?"var(--green)":"var(--gold)" }}>{rev?"✓ done":"○ open"}</span>
+              {hasAnyR && <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:700, color:rColor(rVal) }}>{fmtR(rVal)}</span>}
+              <span style={{ display:"inline-flex" }}>
+                <span style={{ fontFamily:"var(--font-mono)", fontSize:10, fontWeight:600, color:rev?"var(--green)":"var(--gold)", background:rev?"var(--green)15":"var(--gold)15", border:`1px solid ${rev?"var(--green)35":"var(--gold)35"}`, borderRadius:10, padding:"2px 8px" }}>
+                  {rev ? "done" : "open"}
+                </span>
+              </span>
               <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:filled>0?"var(--blue)":"var(--dim)", fontWeight:filled>0?700:500 }}>
                 {mistakes.length>0&&<span style={{ color:"var(--red)", marginRight:2 }}>⚠</span>}
                 {filled>0?`●${filled}`:"○"}
@@ -1359,7 +1473,7 @@ const toJournalDate = d => {
 };
 const fmtJournalDate = d => toJournalDate(d).toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric" });
 
-function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayMeta, setDayMeta }) {
+function JournalPage({ trades, onSelectTrade, onNavigateToTrade, onUpsertTrade, onDeleteTrade, dayMeta, setDayMeta }) {
   const [selectedDayId, setSelectedDayId] = useState("");
   const [editingTrade, setEditingTrade] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -1484,7 +1598,7 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
               key={day}
               onClick={()=>setSelectedDayId(day)}
               type="button"
-              style={{ width:"100%", textAlign:"left", background:selectedCard?"var(--surface3)":"var(--surface)", border:"none", borderBottom:"1px solid var(--border)", padding:"14px", color:"var(--text)" }}
+              style={{ width:"100%", textAlign:"left", background:selectedCard?"var(--surface3)":"var(--surface)", border:"none", borderBottom:"1px solid var(--border)", borderLeft:`3px solid ${selectedCard?"var(--green)":"transparent"}`, padding:"14px 14px 14px 11px", color:"var(--text)", cursor:"pointer", transition:"border-color 0.15s, background 0.15s" }}
               aria-pressed={selectedCard}
             >
               <div style={{ fontFamily:"var(--font-mono)", fontSize:12, color:"var(--muted)", marginBottom:8 }}>{fmtJournalDate(day)}</div>
@@ -1521,8 +1635,8 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
             aria-label="Journal notes"
           />
 
-          <div style={{ paddingTop:16, marginTop:16 }}>
-            <div style={{ marginBottom:10, fontFamily:"var(--font-display)", fontSize:16 }}>Image</div>
+          <div style={{ paddingTop:10, marginTop:8 }}>
+            <div style={{ marginBottom:8, fontFamily:"var(--font-display)", fontSize:14, color:"var(--muted)", fontWeight:600 }}>Image</div>
             {!selectedMeta.image ? (
               <button type="button" onClick={()=>fileRef.current?.click()} style={{ width:140, height:140, border:"1px dashed var(--border2)", background:"transparent", color:"var(--muted)", fontFamily:"var(--font-mono)" }}>Add Image</button>
             ) : (
@@ -1558,10 +1672,14 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
                         <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.contracts}</td>
                         <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.entryPrice}</td>
                         <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.exitPrice}</td>
-                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)", color:Number(t.pnl||0)>=0?"var(--green)":"var(--red)", fontWeight:700 }}>{fmt(Number(t.pnl||0),2)}</td>
+                        <td
+                          style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)", color:Number(t.pnl||0)>=0?"var(--green)":"var(--red)", fontWeight:700, cursor:"pointer", textDecoration:"underline", textDecorationStyle:"dotted", textUnderlineOffset:3 }}
+                          title="View in Trade Log"
+                          onClick={(e)=>{ e.stopPropagation(); onNavigateToTrade(t); }}
+                        >{fmt(Number(t.pnl||0),2)}</td>
                         <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>
-                          <button type="button" onClick={(e)=>{e.stopPropagation(); setEditingTrade(makeDraftFromTrade(t));}} style={{ background:"transparent", border:"none", color:"var(--blue)", marginRight:8 }}>Edit</button>
-                          <button type="button" onClick={(e)=>{e.stopPropagation(); onDeleteTrade(t.id);}} style={{ background:"transparent", border:"none", color:"var(--red)" }}>Delete</button>
+                          <button type="button" onClick={(e)=>{e.stopPropagation(); setEditingTrade(makeDraftFromTrade(t));}} style={{ background:"transparent", border:"none", color:"var(--blue)", marginRight:8, cursor:"pointer" }}>Edit</button>
+                          <button type="button" onClick={(e)=>{e.stopPropagation(); onDeleteTrade(t.id);}} style={{ background:"transparent", border:"none", color:"var(--red)", cursor:"pointer" }}>Delete</button>
                         </td>
                       </tr>
                     ))}
@@ -1708,7 +1826,19 @@ export default function App() {
     });
   },[]);
 
+  const deleteAllTrades = useCallback(()=>{
+    setTrades([]);
+    setNotes({});
+  },[]);
+
   const openTradeDetail = useCallback((trade)=>{
+    setSelectedDayId(trade.date);
+    setSelectedTradeId(trade.id);
+    setViewMode("TRADE_DETAIL");
+  },[]);
+
+  const navigateToTrade = useCallback((trade)=>{
+    setPage("trades");
     setSelectedDayId(trade.date);
     setSelectedTradeId(trade.id);
     setViewMode("TRADE_DETAIL");
@@ -1804,7 +1934,7 @@ export default function App() {
           ))}
         </nav>
 
-        <div style={{ padding:"20px 20px", borderTop:"1px solid var(--border)" }}>
+        <div style={{ padding:"20px 20px", borderTop:"1px solid var(--border2)" }}>
           <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8, fontWeight:600 }}>TOTAL P&L</div>
           <div style={{ fontFamily:"var(--font-display)", fontSize:32, fontWeight:700, color:totalPnl>=0?"var(--green)":"var(--red)", marginBottom:4 }}>
             {totalPnl>=0?"+":""}{Math.round(totalPnl)}
@@ -1830,9 +1960,9 @@ export default function App() {
 
         <div style={{ flex:1, overflowY:"auto", padding:"24px 28px" }}>
           {page==="dashboard" && <Dashboard trades={trades} notes={notes} dayMeta={journalDays} setDayMeta={setJournalDays} onSelectTrade={setSelTrade}/>} 
-          {page==="trades"    && (viewMode==="TRADE_DETAIL" ? <TradeDetailPage trades={trades} selectedDayId={selectedDayId} selectedTradeId={selectedTradeId} onBack={()=>setViewMode("DAY")} dayMeta={journalDays} setDayMeta={setJournalDays} notes={notes} onUpdate={updateNote} onClearTradeNotes={(tradeId)=>setNotes(prev=>{ const next={...prev}; delete next[tradeId]; return next; })} playbooks={playbooks} /> : <TradeLog trades={trades} notes={notes} playbooks={playbooks} onSelect={openTradeDetail} onImport={importTrades}/>)} 
-          {page==="playbook"  && <Playbook   trades={trades} notes={notes} playbooks={playbooks} setPlaybooks={setPlaybooks}/>} 
-          {page==="journal"   && <JournalPage trades={trades} onSelectTrade={setSelTrade} onUpsertTrade={upsertTrade} onDeleteTrade={deleteTrade} dayMeta={journalDays} setDayMeta={setJournalDays}/>} 
+          {page==="trades"    && (viewMode==="TRADE_DETAIL" ? <TradeDetailPage trades={trades} selectedDayId={selectedDayId} selectedTradeId={selectedTradeId} onBack={()=>setViewMode("DAY")} dayMeta={journalDays} setDayMeta={setJournalDays} notes={notes} onUpdate={updateNote} onClearTradeNotes={(tradeId)=>setNotes(prev=>{ const next={...prev}; delete next[tradeId]; return next; })} playbooks={playbooks} /> : <TradeLog trades={trades} notes={notes} playbooks={playbooks} onSelect={openTradeDetail} onImport={importTrades} onDeleteAll={deleteAllTrades}/>)}
+          {page==="playbook"  && <Playbook   trades={trades} notes={notes} playbooks={playbooks} setPlaybooks={setPlaybooks}/>}
+          {page==="journal"   && <JournalPage trades={trades} onSelectTrade={setSelTrade} onNavigateToTrade={navigateToTrade} onUpsertTrade={upsertTrade} onDeleteTrade={deleteTrade} dayMeta={journalDays} setDayMeta={setJournalDays}/>}
         </div>
       </div>
 
