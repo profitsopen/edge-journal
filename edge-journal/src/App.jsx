@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppLayout from "./layout/AppLayout";
 import Journal from "./pages/Journal";
 import { Area, AreaChart, Bar, BarChart, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { loadAppState, saveCoreState, saveJournalDays } from "./lib/storage";
+import { auth, signInWithGoogle, signOutUser, onAuthStateChanged } from "./lib/firebase";
+import { loadUserData, saveTrades, saveNotes, savePlaybooks, saveJournalDays } from "./lib/firestore";
 
 const GlobalStyles = () => (
   <style>{`
@@ -1609,50 +1610,66 @@ const NAV_ITEMS = [
 
 export default function App() {
   const [page,      setPage]      = useState("dashboard");
-  const [trades,    setTrades]    = useState(DEMO_TRADES);
+  const [trades,    setTrades]    = useState([]);
   const [notes,     setNotes]     = useState({});
-  const [playbooks, setPlaybooks] = useState(DEMO_PLAYBOOKS);
+  const [playbooks, setPlaybooks] = useState([]);
   const [selTrade,  setSelTrade]  = useState(null);
   const [selectedDayId, setSelectedDayId] = useState("");
   const [selectedTradeId, setSelectedTradeId] = useState("");
   const [viewMode, setViewMode] = useState("DAY");
-  const [journalDays, setJournalDays] = useState(() => {
-    try {
-      const saved = localStorage.getItem(JOURNAL_STORAGE_KEY);
-      return normalizeJournalDays(saved ? JSON.parse(saved) : []);
-    } catch {
-      return [];
-    }
-  });
+  const [journalDays, setJournalDays] = useState([]);
 
-  useEffect(()=>{
-    try {
-      localStorage.setItem(JOURNAL_STORAGE_KEY, JSON.stringify(normalizeJournalDays(journalDays)));
-    } catch(e) {}
-  }, [journalDays]);
+  // Auth + data loading state
+  const [user,        setUser]        = useState(undefined); // undefined = checking auth
+  const [dataLoading, setDataLoading] = useState(false);
+  const dataReadyRef = useRef(false); // prevents saving before initial load completes
+
+  // ─── Auth observer & initial data load ──────────────────────────────────────
+  useEffect(() => {
+    return onAuthStateChanged(auth, async (u) => {
+      if (u) {
+        dataReadyRef.current = false;
+        setDataLoading(true);
+        setUser(u);
+        try {
+          const data = await loadUserData(u.uid);
+          if (data.trades      !== null) setTrades(data.trades);
+          if (data.notes       !== null) setNotes(data.notes);
+          if (data.playbooks   !== null) setPlaybooks(data.playbooks);
+          if (data.journalDays !== null) setJournalDays(normalizeJournalDays(data.journalDays));
+        } catch (e) {
+          console.error("Failed to load data:", e);
+        }
+        setDataLoading(false);
+        dataReadyRef.current = true;
+      } else {
+        dataReadyRef.current = false;
+        setUser(null);
+        setTrades([]);
+        setNotes({});
+        setPlaybooks([]);
+        setJournalDays([]);
+      }
+    });
+  }, []);
+
+  // ─── Save trades / notes / playbooks on change ──────────────────────────────
+  useEffect(() => {
+    if (!user || !dataReadyRef.current) return;
+    saveTrades(user.uid, trades);
+    saveNotes(user.uid, notes);
+    savePlaybooks(user.uid, playbooks);
+  }, [trades, notes, playbooks]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Save journal days on change ────────────────────────────────────────────
+  useEffect(() => {
+    if (!user || !dataReadyRef.current) return;
+    saveJournalDays(user.uid, normalizeJournalDays(journalDays));
+  }, [journalDays]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(()=>{
     if (page !== "trades") setViewMode("DAY");
   }, [page]);
-
-  useEffect(()=>{
-    try {
-      const t = localStorage.getItem("ej_trades");
-      const n = localStorage.getItem("ej_notes");
-      const p = localStorage.getItem("ej_playbooks");
-      if (t) setTrades(JSON.parse(t));
-      if (n) setNotes(JSON.parse(n));
-      if (p) setPlaybooks(JSON.parse(p));
-    } catch(e) {}
-  },[]);
-
-  useEffect(()=>{
-    try {
-      localStorage.setItem("ej_trades",    JSON.stringify(trades));
-      localStorage.setItem("ej_notes",     JSON.stringify(notes));
-      localStorage.setItem("ej_playbooks", JSON.stringify(playbooks));
-    } catch(e) {}
-  },[trades,notes,playbooks]);
 
   const updateNote = useCallback((id,k,v)=>{
     setNotes(prev=>({...prev,[id]:{...(prev[id]||{}),[k]:v}}));
@@ -1693,6 +1710,48 @@ export default function App() {
   const wins     = trades.filter(t=>t.win).length;
   const unreviewed = trades.filter(t=>!isReviewed(notes[t.id])).length;
 
+  // ─── Auth loading (checking if user is signed in) ───────────────────────────
+  if (user === undefined) {
+    return (
+      <div style={{ display:"flex", height:"100vh", alignItems:"center", justifyContent:"center", background:"var(--bg)" }}>
+        <GlobalStyles/>
+        <div style={{ fontFamily:"var(--font-mono)", fontSize:12, color:"var(--muted)" }}>Connecting…</div>
+      </div>
+    );
+  }
+
+  // ─── Not signed in ───────────────────────────────────────────────────────────
+  if (user === null) {
+    return (
+      <div style={{ display:"flex", height:"100vh", alignItems:"center", justifyContent:"center", background:"var(--bg)" }}>
+        <GlobalStyles/>
+        <div style={{ textAlign:"center" }}>
+          <div style={{ fontFamily:"var(--font-display)", fontSize:36, fontWeight:800, letterSpacing:"-1px", marginBottom:4 }}>
+            EDGE<span style={{ color:"var(--green)" }}>.</span>
+          </div>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", letterSpacing:"0.15em", marginBottom:40 }}>TRADE JOURNAL</div>
+          <button
+            onClick={() => signInWithGoogle().catch(console.error)}
+            style={{ display:"flex", alignItems:"center", gap:10, background:"var(--surface)", border:"1px solid var(--border2)", color:"var(--text)", borderRadius:8, padding:"12px 24px", fontFamily:"var(--font-mono)", fontSize:13, cursor:"pointer" }}
+          >
+            <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z"/></svg>
+            Sign in with Google
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Data loading after sign-in ──────────────────────────────────────────────
+  if (dataLoading) {
+    return (
+      <div style={{ display:"flex", height:"100vh", alignItems:"center", justifyContent:"center", background:"var(--bg)" }}>
+        <GlobalStyles/>
+        <div style={{ fontFamily:"var(--font-mono)", fontSize:12, color:"var(--muted)" }}>Loading your data…</div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display:"flex", height:"100vh", overflow:"hidden" }}>
       <GlobalStyles/>
@@ -1724,9 +1783,11 @@ export default function App() {
           <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:totalPnl>=0?"var(--green)":"var(--red)", marginBottom:2 }}>
             {totalPnl>=0?"+":""}{Math.round(totalPnl)}
           </div>
-          <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)" }}>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", marginBottom:12 }}>
             {wins}/{trades.length} wins · {Math.round(wins/trades.length*100)}% WR
           </div>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", marginBottom:4, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{user.displayName || user.email}</div>
+          <button onClick={() => signOutUser()} style={{ background:"none", border:"1px solid var(--border)", color:"var(--muted)", borderRadius:6, padding:"5px 10px", fontSize:11, fontFamily:"var(--font-mono)", cursor:"pointer", width:"100%" }}>Sign out</button>
         </div>
       </div>
 
