@@ -1160,6 +1160,13 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport, onDeleteAll })
         <Btn variant="primary" onClick={()=>setModal(true)}>⬆ Import CSV</Btn>
         <div style={{ flex:1 }}/>
 
+        {/* Delete All — prominent on right */}
+        <button onClick={()=>setConfirmDelete(true)} style={{ background:"transparent", border:"1px solid var(--red)77", color:"var(--red)", padding:"6px 14px", borderRadius:6, fontSize:11, fontFamily:"var(--font-mono)", fontWeight:700, cursor:"pointer", transition:"all 0.2s" }}
+          onMouseEnter={e=>{e.currentTarget.style.background="var(--red)15";e.currentTarget.style.borderColor="var(--red)";}}
+          onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor="var(--red)77";}}>
+          🗑 Delete All
+        </button>
+
         {/* Reviewed filter — most prominent */}
         <div style={{ display:"flex", gap:4, background:"var(--surface)", border:"1px solid var(--border)", borderRadius:8, padding:3 }}>
           {[
@@ -1184,12 +1191,6 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport, onDeleteAll })
           <option value="all">All Dates</option>
           {dates.map(d=><option key={d} value={d}>{d}</option>)}
         </select>
-
-        <button onClick={()=>setConfirmDelete(true)} style={{ background:"transparent", border:"1px solid var(--red)55", color:"var(--red)99", padding:"6px 14px", borderRadius:6, fontSize:11, fontFamily:"var(--font-mono)", fontWeight:600, cursor:"pointer", transition:"all 0.15s" }}
-          onMouseEnter={e=>{e.currentTarget.style.background="var(--red-dim)";e.currentTarget.style.color="var(--red)";}}
-          onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color="var(--red)99";}}>
-          🗑 Delete All
-        </button>
       </div>
 
       {/* Table */}
