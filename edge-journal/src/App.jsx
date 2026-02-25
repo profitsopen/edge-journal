@@ -1152,7 +1152,7 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport, onDeleteAll })
         </div>
       )}
 
-      {/* Filters — Row 1: Import + review/side filters */}
+      {/* Filters — Row 1: Import | Reviewed pills | Delete All */}
       <div style={{ display:"flex", gap:10, marginBottom:8, alignItems:"center" }}>
         <Btn variant="primary" onClick={()=>setModal(true)}>⬆ Import CSV</Btn>
         <div style={{ flex:1 }}/>
@@ -1170,24 +1170,24 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport, onDeleteAll })
           ))}
         </div>
 
-        {[{v:"all",l:"All"},{v:"LONG",l:"Long"},{v:"SHORT",l:"Short"}].map(o=>(
-          <button key={o.v} onClick={()=>setFSide(o.v)} style={{ background:fSide===o.v?"var(--surface3)":"var(--surface)", border:`1px solid ${fSide===o.v?"var(--border2)":"var(--border)"}`, color:fSide===o.v?"var(--text)":"var(--muted)", padding:"6px 14px", borderRadius:6, fontSize:11, fontFamily:"var(--font-mono)", fontWeight:600, cursor:"pointer" }}>{o.l}</button>
-        ))}
-      </div>
-
-      {/* Filters — Row 2: Symbol + Delete All */}
-      <div style={{ display:"flex", gap:10, marginBottom:16, alignItems:"center" }}>
-        <div style={{ flex:1 }}/>
-        <select value={fSym} onChange={e=>setFSym(e.target.value)} style={{ background:"var(--surface)", border:"1px solid var(--border)", color:"var(--muted)", padding:"6px 12px", borderRadius:6, fontSize:11, cursor:"pointer" }}>
-          <option value="all">All Symbols</option>
-          {symbols.map(s=><option key={s} value={s}>{s}</option>)}
-        </select>
         <button onClick={()=>setConfirmDelete(true)}
           style={{ background:"transparent", border:"1px solid var(--red)77", color:"var(--red)", padding:"6px 14px", borderRadius:6, fontSize:11, fontFamily:"var(--font-mono)", fontWeight:700, cursor:"pointer", transition:"all 0.2s" }}
           onMouseEnter={e=>{e.currentTarget.style.background="var(--red-dim)";e.currentTarget.style.borderColor="var(--red)";}}
           onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor="var(--red)77";}}>
           🗑 Delete All
         </button>
+      </div>
+
+      {/* Filters — Row 2: All/Long/Short | All Symbols */}
+      <div style={{ display:"flex", gap:10, marginBottom:16, alignItems:"center" }}>
+        <div style={{ flex:1 }}/>
+        {[{v:"all",l:"All"},{v:"LONG",l:"Long"},{v:"SHORT",l:"Short"}].map(o=>(
+          <button key={o.v} onClick={()=>setFSide(o.v)} style={{ background:fSide===o.v?"var(--surface3)":"var(--surface)", border:`1px solid ${fSide===o.v?"var(--border2)":"var(--border)"}`, color:fSide===o.v?"var(--text)":"var(--muted)", padding:"6px 14px", borderRadius:6, fontSize:11, fontFamily:"var(--font-mono)", fontWeight:600, cursor:"pointer" }}>{o.l}</button>
+        ))}
+        <select value={fSym} onChange={e=>setFSym(e.target.value)} style={{ background:"var(--surface)", border:"1px solid var(--border)", color:"var(--muted)", padding:"6px 12px", borderRadius:6, fontSize:11, cursor:"pointer" }}>
+          <option value="all">All Symbols</option>
+          {symbols.map(s=><option key={s} value={s}>{s}</option>)}
+        </select>
       </div>
 
       {/* Table */}
