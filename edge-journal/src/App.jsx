@@ -371,19 +371,28 @@ function parseCSV(text) {
       const longTrade = lot.side === "BUY";
       const entryPrice = lot.price;
       const exitPrice = fill.price;
-      const pnl = longTrade ? (exitPrice - entryPrice) * matched : (entryPrice - exitPrice) * matched;
+      const tradeSide = longTrade ? "LONG" : "SHORT";
+      const { pnl: calcPnl, ticks: calcTicks } = calculatePnlAndTicks({
+        symbol: fill.symbol,
+        side: tradeSide,
+        entryPrice,
+        exitPrice,
+        contracts: matched,
+      });
+      const rawPnl = longTrade ? (exitPrice - entryPrice) * matched : (entryPrice - exitPrice) * matched;
+      const pnl = getInstrumentSpec(fill.symbol) ? calcPnl : rawPnl;
       trades.push({
         id: `imp_${lot.rowId}_${fill.rowId}_${trades.length}`,
         date: toIsoDate(lot.stamp || fill.stamp || fill.date),
         symbol: fill.symbol,
-        side: longTrade ? "LONG" : "SHORT",
+        side: tradeSide,
         contracts: matched,
         entryTime: toClock(lot.stamp || fill.stamp),
         exitTime: toClock(fill.stamp || lot.stamp),
         entryPrice,
         exitPrice,
         pnl: Number(pnl.toFixed(2)),
-        ticks: 0,
+        ticks: calcTicks,
         duration: "—",
         win: pnl > 0,
       });
