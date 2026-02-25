@@ -32,6 +32,41 @@ const GlobalStyles = () => (
   `}</style>
 );
 
+// ─── INSTRUMENT SPECS ─────────────────────────────────────────────────────────
+const INSTRUMENT_SPECS = {
+  MGC: { tickSize: 0.10, tickValue: 1.00, hint: "MGC: $10/point, 0.10 tick" },
+  MNQ: { tickSize: 0.25, tickValue: 0.50, hint: "MNQ: $2/point, 0.25 tick" },
+};
+
+const getInstrumentSpec = (symbol) => {
+  const normalized = String(symbol || "").trim().toUpperCase();
+  if (normalized.startsWith("MGC")) return INSTRUMENT_SPECS.MGC;
+  if (normalized.startsWith("MNQ")) return INSTRUMENT_SPECS.MNQ;
+  return null;
+};
+
+const calculatePnlAndTicks = ({ symbol, side, entryPrice, exitPrice, contracts, explicitPnl }) => {
+  const spec = getInstrumentSpec(symbol);
+  let ticks = 0;
+
+  if (spec && Number.isFinite(entryPrice) && Number.isFinite(exitPrice)) {
+    const direction = side === "SHORT" ? -1 : 1;
+    const signedPoints = (exitPrice - entryPrice) * direction;
+    const ticksRaw = signedPoints / spec.tickSize;
+    ticks = Number.isFinite(ticksRaw) ? Math.round(ticksRaw) : 0;
+  }
+
+  if (explicitPnl != null && String(explicitPnl).trim() !== "") {
+    const pnl = Number(explicitPnl);
+    return { pnl: Number.isFinite(pnl) ? pnl : 0, ticks };
+  }
+
+  if (!spec) return { pnl: 0, ticks: 0 };
+
+  const pnl = ticks * spec.tickValue * contracts;
+  return { pnl: Number(pnl.toFixed(2)), ticks };
+};
+
 // ─── SEED DATA ────────────────────────────────────────────────────────────────
 const DEMO_TRADES = [
   { id:"t1",  date:"2026-02-17", symbol:"MNQH6", side:"SHORT", contracts:1, entryTime:"10:09:15", exitTime:"10:10:08", entryPrice:24517.25, exitPrice:24538.5,   pnl:-42.5, ticks:-85,  duration:"0:53",  win:false },
@@ -249,19 +284,18 @@ function parseCSV(text) {
       const contracts = Math.max(1, Math.round(toNum(get(r, ["Qty", "Quantity", "Contracts", "qty"]), 1)));
       const entryPrice = toNum(get(r, ["AvgEntryPrice", "AverageEntryPrice", "EntryPrice", "Entry Price"]), NaN);
       const exitPrice = toNum(get(r, ["AvgExitPrice", "AverageExitPrice", "ExitPrice", "Exit Price"]), NaN);
-      const pnl = toNum(get(r, ["ProfitLoss", "PnL", "P&L", "NetProfit", "RealizedPnL"]), NaN);
+      const csvPnl = toNum(get(r, ["ProfitLoss", "PnL", "P&L", "NetProfit", "RealizedPnL"]), NaN);
       const date = toIsoDate(get(r, ["Date", "TradeDate", "EntryTime", "ExitTime", "Opened", "Closed"]));
       const entryTime = toClock(get(r, ["EntryTime", "Opened", "Open Time", "StartTime"]));
       const exitTime = toClock(get(r, ["ExitTime", "Closed", "Close Time", "EndTime"])) || entryTime;
 
-      if (!date || !Number.isFinite(entryPrice) || !Number.isFinite(exitPrice) || !Number.isFinite(pnl)) {
+      if (!date || !Number.isFinite(entryPrice) || !Number.isFinite(exitPrice)) {
         skipped += 1;
         continue;
       }
 
-      const ticks = Number.isFinite(entryPrice) && Number.isFinite(exitPrice)
-        ? Number(((side === "LONG" ? exitPrice - entryPrice : entryPrice - exitPrice) * contracts).toFixed(2))
-        : 0;
+      // Recalculate P&L and ticks using proper instrument specs (entry/exit prices are more reliable than CSV P&L)
+      const { pnl, ticks } = calculatePnlAndTicks({ symbol, side, entryPrice, exitPrice, contracts, explicitPnl: csvPnl });
 
       const trade = {
         id: "",
@@ -995,6 +1029,23 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport }) {
 
   const unreviewedCount = trades.filter(t=>!isReviewed(notes[t.id])).length;
 
+  // Show empty state if no trades yet
+  if (trades.length === 0) {
+    return (
+      <div>
+        {modal && <ImportModal onClose={()=>setModal(false)} onImport={onImport}/>}
+        <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", minHeight:300, gap:24, padding:"60px 40px", textAlign:"center" }}>
+          <div style={{ fontSize:56, opacity:0.5 }}>📊</div>
+          <div>
+            <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, marginBottom:8 }}>No trades yet</div>
+            <div style={{ fontFamily:"var(--font-mono)", fontSize:12, color:"var(--muted)", marginBottom:24, maxWidth:400 }}>Import your Tradovate CSV to get started. Your trades will appear here with P&L analysis and review tracking.</div>
+            <Btn variant="primary" onClick={()=>setModal(true)}>⬆ Import CSV</Btn>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       {modal && <ImportModal onClose={()=>setModal(false)} onImport={onImport}/>}
@@ -1299,40 +1350,6 @@ const toJournalDate = d => {
 };
 const fmtJournalDate = d => toJournalDate(d).toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric" });
 
-const INSTRUMENT_SPECS = {
-  MGC: { tickSize: 0.10, tickValue: 1.00, hint: "MGC: $10/point, 0.10 tick" },
-  MNQ: { tickSize: 0.25, tickValue: 0.50, hint: "MNQ: $2/point, 0.25 tick" },
-};
-
-const getInstrumentSpec = (symbol) => {
-  const normalized = String(symbol || "").trim().toUpperCase();
-  if (normalized.startsWith("MGC")) return INSTRUMENT_SPECS.MGC;
-  if (normalized.startsWith("MNQ")) return INSTRUMENT_SPECS.MNQ;
-  return null;
-};
-
-const deriveManualPnlAndTicks = ({ symbol, side, entryPrice, exitPrice, contracts, explicitPnl }) => {
-  const spec = getInstrumentSpec(symbol);
-
-  let ticks = 0;
-  if (spec) {
-    const direction = side === "SHORT" ? -1 : 1;
-    const signedPoints = (exitPrice - entryPrice) * direction;
-    const ticksRaw = signedPoints / spec.tickSize;
-    ticks = Number.isFinite(ticksRaw) ? Math.round(ticksRaw) : 0;
-  }
-
-  if (explicitPnl != null && String(explicitPnl).trim() !== "") {
-    const pnl = Number(explicitPnl);
-    return { pnl: Number.isFinite(pnl) ? pnl : 0, ticks };
-  }
-
-  if (!spec) return { pnl: 0, ticks: 0 };
-
-  const pnl = ticks * spec.tickValue * contracts;
-  return { pnl: Number(pnl.toFixed(2)), ticks };
-};
-
 function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayMeta, setDayMeta }) {
   const [selectedDayId, setSelectedDayId] = useState("");
   const [editingTrade, setEditingTrade] = useState(null);
@@ -1563,7 +1580,7 @@ function JournalPage({ trades, onSelectTrade, onUpsertTrade, onDeleteTrade, dayM
                     const contracts = Math.max(1, Number(editingTrade.qty||1));
                     const entryPrice = Number(editingTrade.entry||0);
                     const exitPrice = Number(editingTrade.exit||0);
-                    const { pnl, ticks } = deriveManualPnlAndTicks({
+                    const { pnl, ticks } = calculatePnlAndTicks({
                       symbol: editingTrade.symbol,
                       side,
                       entryPrice,
@@ -1765,11 +1782,11 @@ export default function App() {
           <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", marginTop:2, letterSpacing:"0.1em" }}>TRADE JOURNAL</div>
         </div>
 
-        <nav style={{ padding:"12px 10px", flex:1 }}>
+        <nav style={{ padding:"16px 12px", flex:1 }}>
           {NAV_ITEMS.map(n=>(
-            <div key={n.id} className="nav-item" onClick={()=>setPage(n.id)} style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 12px", borderRadius:8, marginBottom:3, cursor:"pointer", background:page===n.id?"var(--surface2)":"transparent", color:page===n.id?"var(--text)":"var(--muted)", position:"relative" }}>
-              <span style={{ fontSize:14, color:page===n.id?"var(--green)":"inherit" }}>{n.icon}</span>
-              <span style={{ fontFamily:"var(--font-display)", fontSize:13, fontWeight:600 }}>{n.label}</span>
+            <div key={n.id} className="nav-item" onClick={()=>setPage(n.id)} style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 14px", borderRadius:8, marginBottom:8, cursor:"pointer", background:page===n.id?"var(--surface2)":"transparent", color:page===n.id?"var(--text)":"var(--muted)", position:"relative" }}>
+              <span style={{ fontSize:16, color:page===n.id?"var(--green)":"inherit" }}>{n.icon}</span>
+              <span style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:600 }}>{n.label}</span>
               {/* Badge for unreviewed on Trade Log */}
               {n.id==="trades" && unreviewed > 0 && (
                 <span style={{ marginLeft:"auto", background:"var(--gold)22", border:"1px solid var(--gold)", color:"var(--gold)", borderRadius:10, fontSize:10, fontWeight:800, padding:"2px 7px", fontFamily:"var(--font-mono)" }}>{unreviewed}</span>
@@ -1778,16 +1795,16 @@ export default function App() {
           ))}
         </nav>
 
-        <div style={{ padding:"16px 20px", borderTop:"1px solid var(--border)" }}>
-          <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:6 }}>TOTAL P&L</div>
-          <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:700, color:totalPnl>=0?"var(--green)":"var(--red)", marginBottom:2 }}>
+        <div style={{ padding:"20px 20px", borderTop:"1px solid var(--border)" }}>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", letterSpacing:"0.1em", marginBottom:8, fontWeight:600 }}>TOTAL P&L</div>
+          <div style={{ fontFamily:"var(--font-display)", fontSize:32, fontWeight:700, color:totalPnl>=0?"var(--green)":"var(--red)", marginBottom:4 }}>
             {totalPnl>=0?"+":""}{Math.round(totalPnl)}
           </div>
-          <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", marginBottom:12 }}>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:12, color:"var(--muted)", marginBottom:16 }}>
             {wins}/{trades.length} wins · {Math.round(wins/trades.length*100)}% WR
           </div>
-          <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", marginBottom:4, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{user.displayName || user.email}</div>
-          <button onClick={() => signOutUser()} style={{ background:"none", border:"1px solid var(--border)", color:"var(--muted)", borderRadius:6, padding:"5px 10px", fontSize:11, fontFamily:"var(--font-mono)", cursor:"pointer", width:"100%" }}>Sign out</button>
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)", marginBottom:8, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{user.displayName || user.email}</div>
+          <button onClick={() => signOutUser()} style={{ background:"none", border:"1px solid var(--border)", color:"var(--muted)", borderRadius:6, padding:"7px 12px", fontSize:12, fontFamily:"var(--font-mono)", cursor:"pointer", width:"100%", transition:"all 0.15s" }}>Sign out</button>
         </div>
       </div>
 
