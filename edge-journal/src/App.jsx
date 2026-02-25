@@ -1061,7 +1061,6 @@ function TradeDetailPage({ trades, selectedDayId, selectedTradeId, onBack, dayMe
 function TradeLog({ trades, notes, playbooks, onSelect, onImport, onDeleteAll }) {
   const [fSide,          setFSide]          = useState("all");
   const [fSym,           setFSym]           = useState("all");
-  const [fDate,          setFDate]          = useState("all");
   const [fReviewed,      setFReviewed]      = useState("all");
   const [modal,          setModal]          = useState(false);
   const [confirmDelete,  setConfirmDelete]  = useState(false);
@@ -1069,16 +1068,14 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport, onDeleteAll })
   const [sortDir,        setSortDir]        = useState("desc");
 
   const symbols = [...new Set(trades.map(t=>t.symbol))];
-  const dates   = [...new Set(trades.map(t=>t.date))].sort();
 
   const filtered = useMemo(() => {
     const base = trades.filter(t => {
       const rev = isReviewed(notes[t.id]);
       return (
-        (fSide==="all"      || t.side===fSide) &&
-        (fSym ==="all"      || t.symbol===fSym) &&
-        (fDate==="all"      || t.date===fDate) &&
-        (fReviewed==="all"  || (fReviewed==="reviewed" ? rev : !rev))
+        (fSide==="all"     || t.side===fSide) &&
+        (fSym ==="all"     || t.symbol===fSym) &&
+        (fReviewed==="all" || (fReviewed==="reviewed" ? rev : !rev))
       );
     });
     if (!sortBy) return base;
@@ -1089,7 +1086,7 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport, onDeleteAll })
       if (av > bv) return sortDir === "asc" ?  1 : -1;
       return 0;
     });
-  }, [trades, notes, fSide, fSym, fDate, fReviewed, sortBy, sortDir]);
+  }, [trades, notes, fSide, fSym, fReviewed, sortBy, sortDir]);
 
   const unreviewedCount = trades.filter(t=>!isReviewed(notes[t.id])).length;
   const hasAnyR = filtered.some(t => calcR(t.pnl, notes[t.id]?.risk1R) !== null);
@@ -1155,19 +1152,12 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport, onDeleteAll })
         </div>
       )}
 
-      {/* Filters */}
-      <div style={{ display:"flex", gap:10, marginBottom:20, flexWrap:"wrap", alignItems:"center" }}>
+      {/* Filters — Row 1: Import + review/side filters */}
+      <div style={{ display:"flex", gap:10, marginBottom:8, alignItems:"center" }}>
         <Btn variant="primary" onClick={()=>setModal(true)}>⬆ Import CSV</Btn>
         <div style={{ flex:1 }}/>
 
-        {/* Delete All — prominent on right */}
-        <button onClick={()=>setConfirmDelete(true)} style={{ background:"transparent", border:"1px solid var(--red)77", color:"var(--red)", padding:"6px 14px", borderRadius:6, fontSize:11, fontFamily:"var(--font-mono)", fontWeight:700, cursor:"pointer", transition:"all 0.2s" }}
-          onMouseEnter={e=>{e.currentTarget.style.background="var(--red)15";e.currentTarget.style.borderColor="var(--red)";}}
-          onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor="var(--red)77";}}>
-          🗑 Delete All
-        </button>
-
-        {/* Reviewed filter — most prominent */}
+        {/* Reviewed segmented filter */}
         <div style={{ display:"flex", gap:4, background:"var(--surface)", border:"1px solid var(--border)", borderRadius:8, padding:3 }}>
           {[
             { v:"all",        l:"All Trades" },
@@ -1183,14 +1173,21 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport, onDeleteAll })
         {[{v:"all",l:"All"},{v:"LONG",l:"Long"},{v:"SHORT",l:"Short"}].map(o=>(
           <button key={o.v} onClick={()=>setFSide(o.v)} style={{ background:fSide===o.v?"var(--surface3)":"var(--surface)", border:`1px solid ${fSide===o.v?"var(--border2)":"var(--border)"}`, color:fSide===o.v?"var(--text)":"var(--muted)", padding:"6px 14px", borderRadius:6, fontSize:11, fontFamily:"var(--font-mono)", fontWeight:600, cursor:"pointer" }}>{o.l}</button>
         ))}
+      </div>
+
+      {/* Filters — Row 2: Symbol + Delete All */}
+      <div style={{ display:"flex", gap:10, marginBottom:16, alignItems:"center" }}>
+        <div style={{ flex:1 }}/>
         <select value={fSym} onChange={e=>setFSym(e.target.value)} style={{ background:"var(--surface)", border:"1px solid var(--border)", color:"var(--muted)", padding:"6px 12px", borderRadius:6, fontSize:11, cursor:"pointer" }}>
           <option value="all">All Symbols</option>
           {symbols.map(s=><option key={s} value={s}>{s}</option>)}
         </select>
-        <select value={fDate} onChange={e=>setFDate(e.target.value)} style={{ background:"var(--surface)", border:"1px solid var(--border)", color:"var(--muted)", padding:"6px 12px", borderRadius:6, fontSize:11, cursor:"pointer" }}>
-          <option value="all">All Dates</option>
-          {dates.map(d=><option key={d} value={d}>{d}</option>)}
-        </select>
+        <button onClick={()=>setConfirmDelete(true)}
+          style={{ background:"transparent", border:"1px solid var(--red)77", color:"var(--red)", padding:"6px 14px", borderRadius:6, fontSize:11, fontFamily:"var(--font-mono)", fontWeight:700, cursor:"pointer", transition:"all 0.2s" }}
+          onMouseEnter={e=>{e.currentTarget.style.background="var(--red-dim)";e.currentTarget.style.borderColor="var(--red)";}}
+          onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor="var(--red)77";}}>
+          🗑 Delete All
+        </button>
       </div>
 
       {/* Table */}
