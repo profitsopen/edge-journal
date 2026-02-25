@@ -1460,6 +1460,7 @@ const normalizeJournalDays = (raw) => {
       notesHtml: typeof d.notesHtml === "string" ? d.notesHtml : "",
       image: typeof d.image === "string" ? d.image : "",
       chartImages: Array.isArray(d.chartImages) ? d.chartImages.filter(v=>typeof v === "string") : (typeof d.image === "string" && d.image ? [d.image] : []),
+      reportCard: (d.reportCard && typeof d.reportCard === "object") ? d.reportCard : undefined,
     }));
 };
 
@@ -1469,18 +1470,49 @@ const toJournalDate = d => {
 };
 const fmtJournalDate = d => toJournalDate(d).toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric" });
 
+// ─── REPORT CARD HELPERS ───────────────────────────────────────────────────────
+const RC_GRADE_OPTIONS = ["A+", "A", "B", "C", "D", "F"];
+const RC_GRADE_COLORS  = { "A+":"#00e5a0", A:"#00e5a0", B:"#3b9eff", C:"#f5c842", D:"#ff9a3b", F:"#ff4d6a" };
+const rcGradeClr = g => RC_GRADE_COLORS[g] || "var(--muted)";
+
+const rcTextareaStyle = {
+  width:"100%", background:"var(--surface2)", border:"1px solid var(--border)",
+  borderRadius:6, color:"var(--text)", fontFamily:"var(--font-mono)", fontSize:13,
+  padding:"10px 12px", resize:"vertical", outline:"none", lineHeight:1.6,
+};
+
+const RC_DEFAULT_SEGMENTS = [
+  { id:"TEMP",  grade:"", playbookOnly:false, sizing:false, immedFavor:false, comments:"" },
+  { id:"9–11",  grade:"", playbookOnly:false, sizing:false, immedFavor:false, comments:"" },
+  { id:"11–12", grade:"", playbookOnly:false, sizing:false, immedFavor:false, comments:"" },
+  { id:"12–2",  grade:"", playbookOnly:false, sizing:false, immedFavor:false, comments:"" },
+  { id:"2–4",   grade:"", playbookOnly:false, sizing:false, immedFavor:false, comments:"" },
+];
+
+const RCSection = ({ label, children }) => (
+  <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"16px 20px" }}>
+    <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:14 }}>
+      <div style={{ fontFamily:"var(--font-mono)", fontSize:9.5, color:"var(--muted)", textTransform:"uppercase", letterSpacing:"0.12em", fontWeight:600, whiteSpace:"nowrap" }}>{label}</div>
+      <div style={{ flex:1, height:1, background:"var(--border)" }} />
+    </div>
+    {children}
+  </div>
+);
+
 function JournalPage({ trades, onSelectTrade, onNavigateToTrade, onUpsertTrade, onDeleteTrade, dayMeta, setDayMeta }) {
   const [selectedDayId, setSelectedDayId] = useState("");
-  const [editingTrade, setEditingTrade] = useState(null);
-  const [collapsed, setCollapsed] = useState(false);
-  const [draftHtml, setDraftHtml] = useState("");
+  const [tab, setTab]                     = useState("notes"); // "notes" | "report"
+  const [editingTrade, setEditingTrade]   = useState(null);
+  const [collapsed, setCollapsed]         = useState(false);
+  const [draftHtml, setDraftHtml]         = useState("");
   const lastLoadedDayRef = useRef("");
-  const notesRef = useRef(null);
-  const fileRef = useRef(null);
+  const notesRef         = useRef(null);
+  const fileRef          = useRef(null);
+  const easiestImgRef    = useRef(null);
 
   const safeDayMeta = useMemo(() => normalizeJournalDays(dayMeta), [dayMeta]);
-  const dayMetaMap = useMemo(() => new Map(safeDayMeta.map(d=>[d.date,d])), [safeDayMeta]);
-  const dayList = useMemo(() => {
+  const dayMetaMap  = useMemo(() => new Map(safeDayMeta.map(d=>[d.date,d])), [safeDayMeta]);
+  const dayList     = useMemo(() => {
     const dates = new Set(trades.map(t=>t.date));
     safeDayMeta.forEach(d=>dates.add(d.date));
     return [...dates].sort((a,b)=>toJournalDate(b)-toJournalDate(a));
@@ -1491,53 +1523,50 @@ function JournalPage({ trades, onSelectTrade, onNavigateToTrade, onUpsertTrade, 
     if (selectedDayId && !dayList.includes(selectedDayId)) setSelectedDayId(dayList[0] || "");
   }, [dayList, selectedDayId]);
 
-
-  const selectedDate = selectedDayId || dayList[0];
+  const selectedDate   = selectedDayId || dayList[0];
   const selectedTrades = useMemo(() => trades.filter(t=>t.date===selectedDate), [trades, selectedDate]);
-  const selectedMeta = dayMetaMap.get(selectedDate) || { date:selectedDate, notesHtml:"", image:"" };
+  const selectedMeta   = dayMetaMap.get(selectedDate) || { date:selectedDate, notesHtml:"", image:"", chartImages:[] };
 
+  // ── Notes editor sync ──────────────────────────────────────────────────────
   useEffect(() => {
     const nextHtml = selectedMeta.notesHtml || "";
-    const editor = notesRef.current;
-    const switchedDays = lastLoadedDayRef.current !== selectedDate;
-
-    if (switchedDays) {
+    const editor   = notesRef.current;
+    const switched = lastLoadedDayRef.current !== selectedDate;
+    if (switched) {
       lastLoadedDayRef.current = selectedDate;
       setDraftHtml(nextHtml);
       if (editor && editor.innerHTML !== nextHtml) editor.innerHTML = nextHtml;
       return;
     }
-
-    if (!editor) return;
-    const editorFocused = document.activeElement === editor;
-    if (editorFocused) return;
-
+    if (!editor || document.activeElement === editor) return;
     if (editor.innerHTML !== nextHtml) editor.innerHTML = nextHtml;
     setDraftHtml(nextHtml);
   }, [selectedDate, selectedMeta.notesHtml]);
 
   useEffect(() => {
     if (!selectedDate) return;
-    const nextHtml = draftHtml === "<br>" ? "" : draftHtml;
-    const timer = setTimeout(() => {
-      updateMeta(selectedDate, d => (d.notesHtml === nextHtml ? d : { ...d, notesHtml: nextHtml }));
-    }, 300);
-    return () => clearTimeout(timer);
+    const html = draftHtml === "<br>" ? "" : draftHtml;
+    const t = setTimeout(() => updateMeta(selectedDate, d => d.notesHtml === html ? d : { ...d, notesHtml: html }), 300);
+    return () => clearTimeout(t);
   }, [draftHtml, selectedDate]);
 
+  // ── Helpers ────────────────────────────────────────────────────────────────
   const updateMeta = (date, updater) => {
     if (!date) return;
     setDayMeta(prev => {
       const i = prev.findIndex(d=>d.date===date);
-      if (i === -1) return [...prev, updater({ date, notesHtml:"", image:"" })];
-      return prev.map((d, idx)=>idx===i ? updater(d) : d);
+      if (i === -1) return [...prev, updater({ date, notesHtml:"", image:"", chartImages:[] })];
+      return prev.map((d,idx) => idx===i ? updater(d) : d);
     });
   };
 
-  const applyFormat = cmd => {
-    notesRef.current?.focus();
-    document.execCommand(cmd, false);
-  };
+  const rc       = selectedMeta.reportCard || {};
+  const updateRC = patch => updateMeta(selectedDate, d => ({ ...d, reportCard: { ...(d.reportCard||{}), ...patch } }));
+
+  const segments      = (rc.segments && rc.segments.length===5) ? rc.segments : RC_DEFAULT_SEGMENTS;
+  const updateSegment = (idx, patch) => updateRC({ segments: segments.map((s,i) => i===idx ? { ...s, ...patch } : s) });
+
+  const applyFormat = cmd => { notesRef.current?.focus(); document.execCommand(cmd, false); };
 
   const onImageUpload = file => {
     if (!file || !selectedDate) return;
@@ -1546,194 +1575,348 @@ function JournalPage({ trades, onSelectTrade, onNavigateToTrade, onUpsertTrade, 
     reader.readAsDataURL(file);
   };
 
+  const onEasiestImgUpload = file => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = e => updateRC({ easiestImage: String(e.target.result) });
+    reader.readAsDataURL(file);
+  };
+
   const dayStats = day => {
-    const dayTrades = trades.filter(t=>t.date===day);
-    const net = dayTrades.reduce((a,t)=>a+Number(t.pnl||0),0);
-    const wins = dayTrades.filter(t=>Number(t.pnl)>0);
-    const losses = dayTrades.filter(t=>Number(t.pnl)<0);
-    const grossWin = wins.reduce((a,t)=>a+Number(t.pnl||0),0);
+    const dt       = trades.filter(t=>t.date===day);
+    const net      = dt.reduce((a,t)=>a+Number(t.pnl||0),0);
+    const wins     = dt.filter(t=>Number(t.pnl)>0);
+    const losses   = dt.filter(t=>Number(t.pnl)<0);
+    const grossWin  = wins.reduce((a,t)=>a+Number(t.pnl||0),0);
     const grossLoss = Math.abs(losses.reduce((a,t)=>a+Number(t.pnl||0),0));
     return {
-      net,
-      trades: dayTrades.length,
-      avgWin: wins.length ? grossWin / wins.length : 0,
+      net, trades:dt.length,
+      avgWin:  wins.length   ? grossWin / wins.length     : 0,
       avgLoss: losses.length ? losses.reduce((a,t)=>a+Number(t.pnl||0),0) / losses.length : 0,
-      winRate: dayTrades.length ? (wins.length / dayTrades.length) * 100 : 0,
+      winRate: dt.length     ? (wins.length / dt.length) * 100 : 0,
       pf: grossLoss > 0 ? grossWin / grossLoss : (grossWin > 0 ? grossWin : 0),
     };
   };
 
   const makeDraftFromTrade = t => ({
-    id: t.id,
-    time: t.entryTime?.slice(0,5) || "",
-    symbol: t.symbol || "",
-    side: t.side || "LONG",
-    qty: t.contracts || 1,
-    entry: t.entryPrice ?? "",
-    exit: t.exitPrice ?? "",
-    pnl: t.pnl ?? "",
+    id: t.id, time: t.entryTime?.slice(0,5)||"", symbol: t.symbol||"",
+    side: t.side||"LONG", qty: t.contracts||1,
+    entry: t.entryPrice??"", exit: t.exitPrice??"", pnl: t.pnl??"",
   });
 
+  const saveEditingTrade = () => {
+    const side      = editingTrade.side || "LONG";
+    const contracts = Math.max(1, Number(editingTrade.qty||1));
+    const entryPrice = Number(editingTrade.entry||0);
+    const exitPrice  = Number(editingTrade.exit||0);
+    const { pnl, ticks } = calculatePnlAndTicks({ symbol:editingTrade.symbol, side, entryPrice, exitPrice, contracts, explicitPnl:editingTrade.pnl });
+    onUpsertTrade({ id:editingTrade.id, date:selectedDate, symbol:editingTrade.symbol, side, contracts, entryTime:`${editingTrade.time||"00:00"}:00`, exitTime:`${editingTrade.time||"00:00"}:00`, entryPrice, exitPrice, pnl, ticks, duration:"—", win:pnl>0 });
+    setEditingTrade(null);
+  };
+
+  const s            = dayStats(selectedDate || "");
+  const overallGrade = rc.overallGrade || "";
+
   if (!selectedDate) {
-    return <div style={{ color:"var(--muted)", fontFamily:"var(--font-mono)" }}>No trading days available yet.</div>;
+    return <div style={{ color:"var(--muted)", fontFamily:"var(--font-mono)", padding:24 }}>No trading days available yet.</div>;
   }
 
+  // ── Common table/edit UI for trades ───────────────────────────────────────
+  const TradesSection = (
+    <div>
+      <SectionTitle title="Trades" action={<Btn onClick={()=>setEditingTrade({ id:`jr_manual_${Date.now()}`, time:"", symbol:"", side:"LONG", qty:1, entry:"", exit:"", pnl:"" })}>+ Add Trade</Btn>} />
+      {!selectedTrades.length ? (
+        <div style={{ border:"1px dashed var(--border2)", borderRadius:8, padding:16, color:"var(--muted)", fontFamily:"var(--font-mono)", fontSize:12 }}>No trades logged for this day yet.</div>
+      ) : (
+        <div style={{ border:"1px solid var(--border)", borderRadius:8, overflow:"hidden" }}>
+          <table style={{ width:"100%", borderCollapse:"collapse", fontFamily:"var(--font-mono)", fontSize:12 }}>
+            <thead>
+              <tr style={{ background:"var(--surface)" }}>
+                {["Time","Symbol","Side","Qty","Entry","Exit","P&L","Actions"].map(h=>(
+                  <th key={h} style={{ textAlign:"left", padding:"9px 10px", borderBottom:"1px solid var(--border)", fontFamily:"var(--font-mono)", fontSize:9.5, color:"var(--muted)", textTransform:"uppercase", letterSpacing:"0.08em", fontWeight:600 }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {selectedTrades.map(t=>(
+                <tr key={t.id} className="hover-row" onClick={()=>onSelectTrade(t)} style={{ cursor:"pointer" }}>
+                  <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.entryTime?.slice(0,5)}</td>
+                  <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.symbol}</td>
+                  <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)", color:t.side==="LONG"?"var(--green)":"var(--red)", fontWeight:600 }}>{t.side}</td>
+                  <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.contracts}</td>
+                  <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.entryPrice}</td>
+                  <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.exitPrice}</td>
+                  <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)", color:Number(t.pnl||0)>=0?"var(--green)":"var(--red)", fontWeight:700 }}
+                    onClick={e=>{e.stopPropagation();onNavigateToTrade(t);}} title="View in Trade Log">{fmt(Number(t.pnl||0),2)}</td>
+                  <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>
+                    <button type="button" onClick={e=>{e.stopPropagation();setEditingTrade(makeDraftFromTrade(t));}} style={{ background:"transparent", border:"none", color:"var(--blue)", marginRight:8, cursor:"pointer", fontFamily:"var(--font-mono)", fontSize:12 }}>Edit</button>
+                    <button type="button" onClick={e=>{e.stopPropagation();onDeleteTrade(t.id);}} style={{ background:"transparent", border:"none", color:"var(--red)", cursor:"pointer", fontFamily:"var(--font-mono)", fontSize:12 }}>Delete</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {editingTrade && (
+        <div style={{ marginTop:12, border:"1px solid var(--border)", borderRadius:8, padding:12, display:"grid", gridTemplateColumns:"repeat(7,minmax(0,1fr))", gap:8 }}>
+          {getInstrumentSpec(editingTrade.symbol) && (
+            <div style={{ gridColumn:"1 / -1", fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)" }}>{getInstrumentSpec(editingTrade.symbol).hint}</div>
+          )}
+          {[["time","Time"],["symbol","Symbol"],["side","Side"],["qty","Qty"],["entry","Entry"],["exit","Exit"],["pnl","P&L"]].map(([k,l])=>(
+            <label key={k} style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", display:"flex", flexDirection:"column", gap:4 }}>
+              {l}
+              <input value={editingTrade[k]} onChange={e=>setEditingTrade(p=>({...p,[k]:e.target.value}))} style={{ background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:6, padding:"8px", fontSize:12 }} />
+            </label>
+          ))}
+          <div style={{ gridColumn:"1 / -1", display:"flex", gap:8 }}>
+            <Btn onClick={saveEditingTrade} variant="primary">Save Trade</Btn>
+            <Btn onClick={()=>setEditingTrade(null)} variant="ghost">Cancel</Btn>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   return (
-    <div style={{ display:"grid", gridTemplateColumns: collapsed?"56px 1fr":"420px 1fr", height:"calc(100vh - 146px)", border:"1px solid var(--border)", borderRadius:10, overflow:"hidden", background:"var(--surface)" }}>
-      <div style={{ borderRight:"1px solid var(--border)", background:"var(--surface)", overflowY:"auto" }}>
-        <div style={{ padding:"10px", borderBottom:"1px solid var(--border)", display:"flex", justifyContent: collapsed?"center":"space-between", alignItems:"center" }}>
-          {!collapsed && <div style={{ fontFamily:"var(--font-display)", fontSize:13, color:"var(--muted)", textTransform:"uppercase", letterSpacing:"0.08em" }}>Daily Summary</div>}
-          <Btn onClick={()=>setCollapsed(v=>!v)} style={{ padding:"4px 8px" }} aria-label={collapsed?"Expand daily summary":"Collapse daily summary"}>{collapsed?"»":"«"}</Btn>
+    <div style={{ display:"grid", gridTemplateColumns:collapsed?"48px 1fr":"240px 1fr", height:"calc(100vh - 146px)", border:"1px solid var(--border)", borderRadius:10, overflow:"hidden" }}>
+
+      {/* ── LEFT SIDEBAR ── */}
+      <div style={{ borderRight:"1px solid var(--border)", background:"var(--surface)", overflowY:"auto", display:"flex", flexDirection:"column" }}>
+        {/* Sticky header */}
+        <div style={{ position:"sticky", top:0, zIndex:10, background:"var(--surface)", borderBottom:"1px solid var(--border)", padding:"10px 12px", display:"flex", justifyContent:collapsed?"center":"space-between", alignItems:"center" }}>
+          {!collapsed && <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", textTransform:"uppercase", letterSpacing:"0.12em", fontWeight:600 }}>Daily Summary</div>}
+          <button onClick={()=>setCollapsed(v=>!v)} style={{ background:"transparent", border:"none", color:"var(--muted)", cursor:"pointer", fontSize:16, lineHeight:1, padding:"2px 4px" }} aria-label={collapsed?"Expand":"Collapse"}>{collapsed?"›":"‹"}</button>
         </div>
 
+        {/* Day cards */}
         {!collapsed && dayList.map(day => {
-          const s = dayStats(day);
-          const selectedCard = day===selectedDate;
+          const ds  = dayStats(day);
+          const sel = day === selectedDate;
           return (
             <button
-              key={day}
+              key={day} type="button"
               onClick={()=>setSelectedDayId(day)}
-              type="button"
-              style={{ width:"100%", textAlign:"left", background:selectedCard?"var(--surface3)":"var(--surface)", border:"none", borderBottom:"1px solid var(--border)", borderLeft:`3px solid ${selectedCard?"var(--green)":"transparent"}`, padding:"14px 14px 14px 11px", color:"var(--text)", cursor:"pointer", transition:"border-color 0.15s, background 0.15s" }}
-              aria-pressed={selectedCard}
+              style={{ width:"100%", textAlign:"left", background:sel?"rgba(0,229,160,0.05)":"transparent", border:"none", borderBottom:"1px solid var(--border)", borderLeft:`3px solid ${sel?"var(--green)":"transparent"}`, padding:"14px 14px 14px 11px", color:"var(--text)", cursor:"pointer", transition:"border-color 0.15s, background 0.15s" }}
             >
-              <div style={{ fontFamily:"var(--font-mono)", fontSize:12, color:"var(--muted)", marginBottom:8 }}>{fmtJournalDate(day)}</div>
-              <div style={{ fontFamily:"var(--font-display)", fontSize:38, fontWeight:700, color:s.net>=0?"var(--green)":"var(--red)", marginBottom:8 }}>{fmt(s.net,2)}</div>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"4px 10px", fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)" }}>
-                <span>Avg Win <b style={{ color:"var(--green)", marginLeft:4 }}>{fmt(s.avgWin,2)}</b></span>
-                <span>Avg Loss <b style={{ color:"var(--red)", marginLeft:4 }}>{fmt(s.avgLoss,2)}</b></span>
-                <span>Win % <b style={{ color:"var(--text)", marginLeft:4 }}>{s.winRate.toFixed(1)}%</b></span>
-                <span>PF <b style={{ color:"var(--text)", marginLeft:4 }}>{s.pf.toFixed(2)}</b></span>
+              <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", marginBottom:5 }}>{fmtJournalDate(day)}</div>
+              <div style={{ fontFamily:"var(--font-mono)", fontSize:22, fontWeight:700, color:ds.net>=0?"var(--green)":"var(--red)", marginBottom:8 }}>{fmt(ds.net,2)}</div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"3px 8px", fontFamily:"var(--font-mono)", fontSize:9.5, color:"var(--muted)" }}>
+                <span>Avg Win <b style={{ color:"var(--green)", marginLeft:3 }}>{fmt(ds.avgWin,1)}</b></span>
+                <span>Avg Loss <b style={{ color:"var(--red)", marginLeft:3 }}>{fmt(ds.avgLoss,1)}</b></span>
+                <span>Win % <b style={{ color:"var(--text)", marginLeft:3 }}>{ds.winRate.toFixed(0)}%</b></span>
+                <span>PF <b style={{ color:"var(--text)", marginLeft:3 }}>{ds.pf.toFixed(2)}</b></span>
               </div>
             </button>
           );
         })}
       </div>
 
-      <div style={{ padding:0, background:"var(--bg)", overflowY:"auto" }}>
-        <div style={{ borderBottom:"1px solid var(--border)", padding:"8px 14px", display:"flex", gap:8 }}>
-          {[["B","bold","Bold"],[<i key="i">I</i>,"italic","Italic"],[<u key="u">U</u>,"underline","Underline"],["•","insertUnorderedList","Bulleted list"],["1.","insertOrderedList","Numbered list"]].map(([label, cmd, aria], i)=>(
-            <Btn key={i} onClick={()=>applyFormat(cmd)} style={{ padding:"6px 10px", minWidth:32 }} aria-label={aria}>{label}</Btn>
+      {/* ── MAIN PANEL ── */}
+      <div style={{ display:"flex", flexDirection:"column", background:"var(--bg)", overflow:"hidden" }}>
+
+        {/* Sticky toolbar */}
+        <div style={{ position:"sticky", top:0, zIndex:10, background:"var(--surface)", borderBottom:"1px solid var(--border)", padding:"0 20px", display:"flex", alignItems:"center", gap:6, minHeight:46, flexShrink:0 }}>
+          {/* Tabs */}
+          {[["notes","Notes"],["report","Report Card"]].map(([t,l])=>(
+            <button key={t} onClick={()=>setTab(t)} style={{ padding:"8px 14px", border:"none", borderRadius:6, background:tab===t?"var(--green-dim)":"transparent", color:tab===t?"var(--green)":"var(--muted)", fontFamily:"var(--font-mono)", fontSize:12, fontWeight:tab===t?700:400, cursor:"pointer", transition:"all 0.15s" }}>{l}</button>
+          ))}
+          <div style={{ flex:1 }}/>
+          {/* Formatting buttons — Notes tab only */}
+          {tab==="notes" && [["B","bold","Bold"],["I","italic","Italic"],["U","underline","Underline"],["•","insertUnorderedList","Bulleted list"],["1.","insertOrderedList","Numbered list"]].map(([label,cmd,aria],i)=>(
+            <button key={i} onClick={()=>applyFormat(cmd)} title={aria} aria-label={aria} style={{ background:"var(--surface2)", border:"1px solid var(--border2)", color:"var(--text)", fontFamily:"var(--font-mono)", fontSize:11, fontWeight:700, padding:"5px 9px", borderRadius:5, minWidth:28, cursor:"pointer" }}>{label}</button>
           ))}
         </div>
 
-        <div style={{ padding:"16px" }}>
-          <div style={{ fontFamily:"var(--font-display)", fontSize:42, fontWeight:700, marginBottom:10 }}>{toJournalDate(selectedDate).toLocaleDateString("en-US", { month:"long", day:"numeric", year:"numeric" })}</div>
-          <div
-            ref={notesRef}
-            contentEditable
-            dir="ltr"
-            suppressContentEditableWarning
-            onInput={e=>{ const html = e.currentTarget.innerHTML; setDraftHtml(html==="<br>"?"":html); }}
-            data-placeholder="Type your notes here..."
-            style={{ minHeight:180, outline:"none", color:"var(--text)", fontFamily:"var(--font-mono)", fontSize:14, borderBottom:"1px solid var(--border)", paddingBottom:18, direction:"ltr", unicodeBidi:"plaintext" }}
-            className="journal-notes"
-            aria-label="Journal notes"
-          />
+        {/* Scrollable content */}
+        <div style={{ flex:1, overflowY:"auto", padding:"28px 32px" }}>
 
-          <div style={{ paddingTop:10, marginTop:8 }}>
-            <div style={{ marginBottom:8, fontFamily:"var(--font-display)", fontSize:14, color:"var(--muted)", fontWeight:600 }}>Image</div>
-            {!selectedMeta.image ? (
-              <button type="button" onClick={()=>fileRef.current?.click()} style={{ width:140, height:140, border:"1px dashed var(--border2)", background:"transparent", color:"var(--muted)", fontFamily:"var(--font-mono)" }}>Add Image</button>
-            ) : (
-              <div>
-                <img src={selectedMeta.image} alt="Journal upload" style={{ maxWidth:360, borderRadius:8, border:"1px solid var(--border)" }} />
-                <div style={{ marginTop:8, display:"flex", gap:8 }}>
-                  <Btn onClick={()=>fileRef.current?.click()}>Replace</Btn>
-                  <Btn onClick={()=>updateMeta(selectedDate, d=>({ ...d, image:"" }))} variant="ghost">Remove</Btn>
-                </div>
-              </div>
-            )}
-            <input ref={fileRef} type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{onImageUpload(e.target.files?.[0]); e.target.value="";}} />
+          {/* Date heading (both tabs) */}
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:24, fontWeight:700, marginBottom:28, color:"var(--text)" }}>
+            {toJournalDate(selectedDate).toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric"})}
           </div>
 
-          <div style={{ marginTop:20 }}>
-            <SectionTitle title="Trades" action={<Btn onClick={()=>setEditingTrade({ id:`jr_manual_${Date.now()}`, time:"", symbol:"", side:"LONG", qty:1, entry:"", exit:"", pnl:"" })}>+ Add Trade</Btn>} />
-            {!selectedTrades.length ? (
-              <div style={{ border:"1px dashed var(--border2)", borderRadius:8, padding:16, color:"var(--muted)", fontFamily:"var(--font-mono)", fontSize:12 }}>No trades logged for this day yet.</div>
-            ) : (
-              <div style={{ border:"1px solid var(--border)", borderRadius:8, overflow:"hidden" }}>
-                <table style={{ width:"100%", borderCollapse:"collapse", fontFamily:"var(--font-mono)", fontSize:12 }}>
-                  <thead>
-                    <tr style={{ background:"var(--surface)" }}>
-                      {["Time","Symbol","Side","Qty","Entry","Exit","P&L","Actions"].map(h=><th key={h} style={{ textAlign:"left", padding:"10px", borderBottom:"1px solid var(--border)" }}>{h}</th>)}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedTrades.map(t=>(
-                      <tr key={t.id} className="hover-row" onClick={()=>onSelectTrade(t)} style={{ cursor:"pointer" }}>
-                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.entryTime?.slice(0,5)}</td>
-                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.symbol}</td>
-                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.side}</td>
-                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.contracts}</td>
-                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.entryPrice}</td>
-                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>{t.exitPrice}</td>
-                        <td
-                          style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)", color:Number(t.pnl||0)>=0?"var(--green)":"var(--red)", fontWeight:700, cursor:"pointer", textDecoration:"underline", textDecorationStyle:"dotted", textUnderlineOffset:3 }}
-                          title="View in Trade Log"
-                          onClick={(e)=>{ e.stopPropagation(); onNavigateToTrade(t); }}
-                        >{fmt(Number(t.pnl||0),2)}</td>
-                        <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>
-                          <button type="button" onClick={(e)=>{e.stopPropagation(); setEditingTrade(makeDraftFromTrade(t));}} style={{ background:"transparent", border:"none", color:"var(--blue)", marginRight:8, cursor:"pointer" }}>Edit</button>
-                          <button type="button" onClick={(e)=>{e.stopPropagation(); onDeleteTrade(t.id);}} style={{ background:"transparent", border:"none", color:"var(--red)", cursor:"pointer" }}>Delete</button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+          {/* ─── NOTES TAB ─────────────────────────────────────────────────── */}
+          {tab==="notes" && (
+            <div style={{ display:"flex", flexDirection:"column", gap:28 }}>
+              {/* Rich-text notes */}
+              <div
+                ref={notesRef}
+                contentEditable dir="ltr" suppressContentEditableWarning
+                onInput={e=>{ const h=e.currentTarget.innerHTML; setDraftHtml(h==="<br>"?"":h); }}
+                data-placeholder="Type your notes here..."
+                style={{ minHeight:200, outline:"none", color:"var(--text)", fontFamily:"var(--font-mono)", fontSize:14, lineHeight:1.7, borderBottom:"1px solid var(--border)", paddingBottom:20, direction:"ltr", unicodeBidi:"plaintext" }}
+                className="journal-notes"
+                aria-label="Journal notes"
+              />
 
-            {editingTrade && (
-              <div style={{ marginTop:12, border:"1px solid var(--border)", borderRadius:8, padding:12, display:"grid", gridTemplateColumns:"repeat(7,minmax(0,1fr))", gap:8 }}>
-                {getInstrumentSpec(editingTrade.symbol) && (
-                  <div style={{ gridColumn:"1 / -1", fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)" }}>
-                    {getInstrumentSpec(editingTrade.symbol).hint}
+              {/* Image upload */}
+              <div>
+                <div style={{ fontFamily:"var(--font-mono)", fontSize:9.5, color:"var(--muted)", textTransform:"uppercase", letterSpacing:"0.1em", fontWeight:600, marginBottom:10 }}>Image</div>
+                {!selectedMeta.image ? (
+                  <button type="button" onClick={()=>fileRef.current?.click()} style={{ width:160, height:120, border:"1px dashed var(--border2)", background:"transparent", color:"var(--muted)", fontFamily:"var(--font-mono)", fontSize:12, borderRadius:8, cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:8 }}>
+                    <span style={{ fontSize:24 }}>📷</span>
+                    <span>Add Image</span>
+                  </button>
+                ) : (
+                  <div>
+                    <img src={selectedMeta.image} alt="Journal" style={{ maxWidth:420, borderRadius:8, border:"1px solid var(--border)" }} />
+                    <div style={{ marginTop:8, display:"flex", gap:8 }}>
+                      <Btn onClick={()=>fileRef.current?.click()}>Replace</Btn>
+                      <Btn onClick={()=>updateMeta(selectedDate, d=>({...d,image:""}))} variant="ghost">Remove</Btn>
+                    </div>
                   </div>
                 )}
-                {[["time","Time"],["symbol","Symbol"],["side","Side"],["qty","Qty"],["entry","Entry"],["exit","Exit"],["pnl","P&L"]].map(([k,l])=>(
-                  <label key={k} style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", display:"flex", flexDirection:"column", gap:4 }}>
-                    {l}
-                    <input value={editingTrade[k]} onChange={e=>setEditingTrade(p=>({...p,[k]:e.target.value}))} style={{ background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:6, padding:"8px", fontSize:12 }} />
-                  </label>
-                ))}
-                <div style={{ gridColumn:"1 / -1", display:"flex", gap:8 }}>
-                  <Btn onClick={()=>{
-                    const side = editingTrade.side || "LONG";
-                    const contracts = Math.max(1, Number(editingTrade.qty||1));
-                    const entryPrice = Number(editingTrade.entry||0);
-                    const exitPrice = Number(editingTrade.exit||0);
-                    const { pnl, ticks } = calculatePnlAndTicks({
-                      symbol: editingTrade.symbol,
-                      side,
-                      entryPrice,
-                      exitPrice,
-                      contracts,
-                      explicitPnl: editingTrade.pnl,
-                    });
-                    const trade = {
-                      id: editingTrade.id,
-                      date: selectedDate,
-                      symbol: editingTrade.symbol,
-                      side,
-                      contracts,
-                      entryTime: `${editingTrade.time || "00:00"}:00`,
-                      exitTime: `${editingTrade.time || "00:00"}:00`,
-                      entryPrice,
-                      exitPrice,
-                      pnl,
-                      ticks,
-                      duration: "—",
-                      win: pnl > 0,
-                    };
-                    onUpsertTrade(trade);
-                    setEditingTrade(null);
-                  }} variant="primary">Save Trade</Btn>
-                  <Btn onClick={()=>setEditingTrade(null)} variant="ghost">Cancel</Btn>
+                <input ref={fileRef} type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{onImageUpload(e.target.files?.[0]); e.target.value="";}} />
+              </div>
+
+              {TradesSection}
+            </div>
+          )}
+
+          {/* ─── REPORT CARD TAB ────────────────────────────────────────────── */}
+          {tab==="report" && (
+            <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+
+              {/* Section 1 — Header strip */}
+              <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                <div>
+                  <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", textTransform:"uppercase", letterSpacing:"0.14em", fontWeight:600, marginBottom:5 }}>Daily Report Card</div>
+                  <div style={{ fontFamily:"var(--font-mono)", fontSize:15, fontWeight:700 }}>{toJournalDate(selectedDate).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric"})}</div>
+                </div>
+                <div style={{ display:"flex", gap:10 }}>
+                  <div style={{ background:"var(--surface2)", border:"1px solid var(--border2)", borderRadius:8, padding:"10px 18px", textAlign:"center", minWidth:80 }}>
+                    <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:4 }}>Overall Grade</div>
+                    <div style={{ fontFamily:"var(--font-mono)", fontSize:26, fontWeight:700, color:overallGrade?rcGradeClr(overallGrade):"var(--dim)" }}>{overallGrade||"—"}</div>
+                  </div>
+                  <div style={{ background:"var(--surface2)", border:"1px solid var(--border2)", borderRadius:8, padding:"10px 18px", textAlign:"center", minWidth:90 }}>
+                    <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:4 }}>P&amp;L</div>
+                    <div style={{ fontFamily:"var(--font-mono)", fontSize:20, fontWeight:700, color:s.net>=0?"var(--green)":"var(--red)" }}>{fmt(s.net,2)}</div>
+                  </div>
                 </div>
               </div>
-            )}
-          </div>
+
+              {/* Section 2 — Today's Goal */}
+              <RCSection label="Today's Goal">
+                <textarea value={rc.goal||""} onChange={e=>updateRC({goal:e.target.value})} placeholder="What is your sole specific focus for today?" rows={3} style={rcTextareaStyle} />
+              </RCSection>
+
+              {/* Section 3 — Reminders */}
+              <RCSection label="Reminders to Myself">
+                <textarea value={rc.reminders||""} onChange={e=>updateRC({reminders:e.target.value})} placeholder="e.g. Intraday time frame continuity — only take trades in the direction of the higher time frame trend." rows={3} style={rcTextareaStyle} />
+              </RCSection>
+
+              {/* Section 4 — Session Segments */}
+              <RCSection label="Session Segments">
+                <div style={{ overflowX:"auto" }}>
+                  <table style={{ width:"100%", borderCollapse:"collapse", fontFamily:"var(--font-mono)", fontSize:12 }}>
+                    <thead>
+                      <tr style={{ background:"var(--surface2)" }}>
+                        {[["Segment","70px"],["Grade","80px"],["Playbook Only","100px"],["Sizing ✓","80px"],["Immed. In My Favor","110px"],["Comments",""]].map(([h,w])=>(
+                          <th key={h} style={{ textAlign:"left", padding:"8px 10px", borderBottom:"1px solid var(--border)", fontFamily:"var(--font-mono)", fontSize:9.5, color:"var(--muted)", textTransform:"uppercase", letterSpacing:"0.08em", fontWeight:600, ...(w?{width:w}:{}) }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {segments.map((seg,idx)=>(
+                        <tr key={seg.id} style={{ background:idx%2===0?"transparent":"rgba(14,20,25,0.5)" }}>
+                          <td style={{ padding:"8px 10px", borderBottom:"1px solid var(--border)", color:"var(--muted)", fontWeight:600, whiteSpace:"nowrap" }}>{seg.id}</td>
+                          <td style={{ padding:"6px 10px", borderBottom:"1px solid var(--border)" }}>
+                            <select value={seg.grade} onChange={e=>updateSegment(idx,{grade:e.target.value})}
+                              style={{ background:"var(--surface3)", border:"1px solid var(--border2)", borderRadius:5, color:seg.grade?rcGradeClr(seg.grade):"var(--muted)", fontFamily:"var(--font-mono)", fontSize:12, fontWeight:seg.grade?700:400, padding:"4px 6px", width:"100%", cursor:"pointer", outline:"none" }}>
+                              <option value="">—</option>
+                              {RC_GRADE_OPTIONS.map(g=><option key={g} value={g}>{g}</option>)}
+                            </select>
+                          </td>
+                          {[["playbookOnly"],["sizing"],["immedFavor"]].map(([k])=>(
+                            <td key={k} style={{ padding:"6px 10px", borderBottom:"1px solid var(--border)", textAlign:"center" }}>
+                              <input type="checkbox" checked={!!seg[k]} onChange={e=>updateSegment(idx,{[k]:e.target.checked})} style={{ width:15, height:15, cursor:"pointer", accentColor:"var(--green)" }} />
+                            </td>
+                          ))}
+                          <td style={{ padding:"6px 10px", borderBottom:"1px solid var(--border)" }}>
+                            <input value={seg.comments||""} onChange={e=>updateSegment(idx,{comments:e.target.value})} placeholder="Comments…" style={{ width:"100%", background:"transparent", border:"none", borderBottom:"1px solid var(--border)", color:"var(--text)", fontFamily:"var(--font-mono)", fontSize:12, outline:"none", padding:"4px 0" }} />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </RCSection>
+
+              {/* Section 5 — Learned + Changes (two columns) */}
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+                <RCSection label="What I Learned / Improved">
+                  <textarea value={rc.learned||""} onChange={e=>updateRC({learned:e.target.value})} placeholder="Key takeaways from today's session…" rows={4} style={rcTextareaStyle} />
+                </RCSection>
+                <RCSection label="Changes From Today">
+                  <textarea value={rc.changes||""} onChange={e=>updateRC({changes:e.target.value})} placeholder="What will you do differently next time?" rows={4} style={rcTextareaStyle} />
+                </RCSection>
+              </div>
+
+              {/* Section 6 — Overview */}
+              <RCSection label="Overview">
+                <textarea value={rc.overview||""} onChange={e=>updateRC({overview:e.target.value})} placeholder="Overall summary of today's session…" rows={5} style={rcTextareaStyle} />
+              </RCSection>
+
+              {/* Section 7 — Easiest Money Trade */}
+              <RCSection label="Easiest Money Trade">
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 260px", gap:16 }}>
+                  <div>
+                    <select value={rc.easiestTradeId||""} onChange={e=>updateRC({easiestTradeId:e.target.value})}
+                      style={{ width:"100%", background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:6, color:"var(--text)", fontFamily:"var(--font-mono)", fontSize:12, padding:"8px 10px", marginBottom:10, outline:"none" }}>
+                      <option value="">Select trade…</option>
+                      {selectedTrades.map(t=>(
+                        <option key={t.id} value={t.id}>{t.entryTime?.slice(0,5)} · {t.symbol} · {t.side} · {fmt(t.pnl,2)}</option>
+                      ))}
+                    </select>
+                    <textarea value={rc.easiestWriteup||""} onChange={e=>updateRC({easiestWriteup:e.target.value})} placeholder="Describe what made this trade easy…" rows={5} style={rcTextareaStyle} />
+                  </div>
+                  <div>
+                    {!rc.easiestImage ? (
+                      <button type="button" onClick={()=>easiestImgRef.current?.click()} style={{ width:"100%", minHeight:160, border:"1px dashed var(--border2)", background:"transparent", color:"var(--muted)", fontFamily:"var(--font-mono)", fontSize:12, borderRadius:8, cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:8 }}>
+                        <span style={{ fontSize:28 }}>📷</span>
+                        <span>Add Chart Screenshot</span>
+                      </button>
+                    ) : (
+                      <div>
+                        <img src={rc.easiestImage} alt="Easiest trade chart" style={{ width:"100%", maxHeight:200, objectFit:"contain", borderRadius:8, border:"1px solid var(--border)" }} />
+                        <div style={{ marginTop:6, display:"flex", gap:6 }}>
+                          <Btn onClick={()=>easiestImgRef.current?.click()} style={{ fontSize:10, padding:"4px 8px" }}>Replace</Btn>
+                          <Btn onClick={()=>updateRC({easiestImage:""})} variant="ghost" style={{ fontSize:10, padding:"4px 8px" }}>Remove</Btn>
+                        </div>
+                      </div>
+                    )}
+                    <input ref={easiestImgRef} type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{onEasiestImgUpload(e.target.files?.[0]); e.target.value="";}} />
+                  </div>
+                </div>
+              </RCSection>
+
+              {/* Section 8 — Overall Day Grade */}
+              <RCSection label="Overall Day Grade">
+                <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                  {RC_GRADE_OPTIONS.map(g => {
+                    const sel = overallGrade === g;
+                    const clr = rcGradeClr(g);
+                    return (
+                      <button key={g} onClick={()=>updateRC({overallGrade:sel?"":g})}
+                        style={{ padding:"8px 22px", borderRadius:20, border:`1px solid ${sel?clr:"var(--border2)"}`, background:sel?`${clr}22`:"transparent", color:sel?clr:"var(--muted)", fontFamily:"var(--font-mono)", fontSize:13, fontWeight:sel?700:400, cursor:"pointer", transition:"all 0.15s" }}>
+                        {g}
+                      </button>
+                    );
+                  })}
+                </div>
+              </RCSection>
+
+              {/* Save button (data auto-saves; this provides a tactile confirmation) */}
+              <button
+                onClick={()=>{/* no-op: all fields save on change */}}
+                style={{ width:"100%", padding:"14px", background:"var(--green)", border:"none", borderRadius:8, color:"#000", fontFamily:"var(--font-mono)", fontSize:12, fontWeight:700, letterSpacing:"0.12em", textTransform:"uppercase", cursor:"pointer", marginBottom:8 }}>
+                Save Report Card
+              </button>
+
+            </div>
+          )}
+
         </div>
       </div>
     </div>
