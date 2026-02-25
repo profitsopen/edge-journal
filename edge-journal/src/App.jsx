@@ -285,6 +285,7 @@ function parseCSV(text) {
       const entryPrice = toNum(get(r, ["AvgEntryPrice", "AverageEntryPrice", "EntryPrice", "Entry Price"]), NaN);
       const exitPrice = toNum(get(r, ["AvgExitPrice", "AverageExitPrice", "ExitPrice", "Exit Price"]), NaN);
       const csvPnl = toNum(get(r, ["ProfitLoss", "PnL", "P&L", "NetProfit", "RealizedPnL"]), NaN);
+      const csvCommission = toNum(get(r, ["Commission", "Commissions", "Fees", "Fee", "TotalFees", "Total Fees", "TotalCommission", "Total Commission"]), 0);
       const date = toIsoDate(get(r, ["Date", "TradeDate", "EntryTime", "ExitTime", "Opened", "Closed"]));
       const entryTime = toClock(get(r, ["EntryTime", "Opened", "Open Time", "StartTime"]));
       const exitTime = toClock(get(r, ["ExitTime", "Closed", "Close Time", "EndTime"])) || entryTime;
@@ -295,7 +296,9 @@ function parseCSV(text) {
       }
 
       // Recalculate P&L and ticks using proper instrument specs (entry/exit prices are more reliable than CSV P&L)
-      const { pnl, ticks } = calculatePnlAndTicks({ symbol, side, entryPrice, exitPrice, contracts, explicitPnl: csvPnl });
+      const { pnl: grossPnl, ticks } = calculatePnlAndTicks({ symbol, side, entryPrice, exitPrice, contracts, explicitPnl: csvPnl });
+      // Subtract commission/fees to get net P&L
+      const pnl = Number((grossPnl - Math.abs(csvCommission)).toFixed(2));
 
       const trade = {
         id: "",
