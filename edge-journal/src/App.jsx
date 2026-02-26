@@ -1529,12 +1529,13 @@ const RCSection = ({ label, children }) => (
   </div>
 );
 
-function JournalPage({ trades, onSelectTrade, onNavigateToTrade, onUpsertTrade, onDeleteTrade, dayMeta, setDayMeta }) {
+function JournalPage({ trades, onSelectTrade, onNavigateToTrade, onUpsertTrade, onDeleteTrade, dayMeta, setDayMeta, onSave }) {
   const [selectedDayId, setSelectedDayId] = useState("");
-  const [tab, setTab]                     = useState("notes"); // "notes" | "report"
+  const [tab, setTab]                     = useState("notes");
   const [editingTrade, setEditingTrade]   = useState(null);
   const [collapsed, setCollapsed]         = useState(false);
   const [draftHtml, setDraftHtml]         = useState("");
+  const [saveStatus, setSaveStatus]       = useState("idle"); // "idle" | "saving" | "saved" | "error"
   const [previewImg, setPreviewImg]       = useState(null);
   const lastLoadedDayRef = useRef("");
   const notesRef         = useRef(null);
@@ -1768,6 +1769,11 @@ function JournalPage({ trades, onSelectTrade, onNavigateToTrade, onUpsertTrade, 
             <button key={t} onClick={()=>setTab(t)} style={{ padding:"8px 14px", border:"none", borderRadius:6, background:tab===t?"var(--green-dim)":"transparent", color:tab===t?"var(--green)":"var(--muted)", fontFamily:"var(--font-mono)", fontSize:12, fontWeight:tab===t?700:400, cursor:"pointer", transition:"all 0.15s" }}>{l}</button>
           ))}
           <div style={{ flex:1 }}/>
+          {/* Auto-save indicator */}
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", display:"flex", alignItems:"center", gap:5 }}>
+            <span style={{ width:6, height:6, borderRadius:"50%", background:"var(--green)", display:"inline-block", opacity:0.7 }}/>
+            Auto-saving to Firestore
+          </div>
           {/* Formatting buttons — Notes tab only */}
           {tab==="notes" && [["B","bold","Bold"],["I","italic","Italic"],["U","underline","Underline"],["•","insertUnorderedList","Bulleted list"],["1.","insertOrderedList","Numbered list"]].map(([label,cmd,aria],i)=>(
             <button key={i} onClick={()=>applyFormat(cmd)} title={aria} aria-label={aria} style={{ background:"var(--surface2)", border:"1px solid var(--border2)", color:"var(--text)", fontFamily:"var(--font-mono)", fontSize:11, fontWeight:700, padding:"5px 9px", borderRadius:5, minWidth:28, cursor:"pointer" }}>{label}</button>
@@ -1993,11 +1999,22 @@ function JournalPage({ trades, onSelectTrade, onNavigateToTrade, onUpsertTrade, 
                 </div>
               </RCSection>
 
-              {/* Save button (data auto-saves; this provides a tactile confirmation) */}
+              {/* Save button — explicitly flushes to Firestore */}
               <button
-                onClick={()=>{/* no-op: all fields save on change */}}
-                style={{ width:"100%", padding:"14px", background:"var(--green)", border:"none", borderRadius:8, color:"#000", fontFamily:"var(--font-mono)", fontSize:12, fontWeight:700, letterSpacing:"0.12em", textTransform:"uppercase", cursor:"pointer", marginBottom:8 }}>
-                Save Report Card
+                disabled={saveStatus==="saving"}
+                onClick={async ()=>{
+                  setSaveStatus("saving");
+                  try {
+                    await onSave();
+                    setSaveStatus("saved");
+                    setTimeout(()=>setSaveStatus("idle"), 2500);
+                  } catch {
+                    setSaveStatus("error");
+                    setTimeout(()=>setSaveStatus("idle"), 3000);
+                  }
+                }}
+                style={{ width:"100%", padding:"14px", background:saveStatus==="saved"?"#00b37a":saveStatus==="error"?"var(--red)":"var(--green)", border:"none", borderRadius:8, color:"#000", fontFamily:"var(--font-mono)", fontSize:12, fontWeight:700, letterSpacing:"0.12em", textTransform:"uppercase", cursor:saveStatus==="saving"?"wait":"pointer", marginBottom:8, transition:"background 0.2s" }}>
+                {saveStatus==="saving" ? "Saving…" : saveStatus==="saved" ? "✓ Saved to Database" : saveStatus==="error" ? "✕ Save Failed" : "Save Report Card"}
               </button>
 
             </div>
@@ -2228,7 +2245,7 @@ export default function App() {
           {page==="dashboard" && <Dashboard trades={trades} notes={notes} dayMeta={journalDays} setDayMeta={setJournalDays} onSelectTrade={setSelTrade}/>} 
           {page==="trades"    && (viewMode==="TRADE_DETAIL" ? <TradeDetailPage trades={trades} selectedDayId={selectedDayId} selectedTradeId={selectedTradeId} onBack={()=>setViewMode("DAY")} dayMeta={journalDays} setDayMeta={setJournalDays} notes={notes} onUpdate={updateNote} onClearTradeNotes={(tradeId)=>setNotes(prev=>{ const next={...prev}; delete next[tradeId]; return next; })} playbooks={playbooks} /> : <TradeLog trades={trades} notes={notes} playbooks={playbooks} onSelect={openTradeDetail} onImport={importTrades} onDeleteAll={deleteAllTrades}/>)}
           {page==="playbook"  && <Playbook   trades={trades} notes={notes} playbooks={playbooks} setPlaybooks={setPlaybooks}/>}
-          {page==="journal"   && <JournalPage trades={trades} onSelectTrade={setSelTrade} onNavigateToTrade={navigateToTrade} onUpsertTrade={upsertTrade} onDeleteTrade={deleteTrade} dayMeta={journalDays} setDayMeta={setJournalDays}/>}
+          {page==="journal"   && <JournalPage trades={trades} onSelectTrade={setSelTrade} onNavigateToTrade={navigateToTrade} onUpsertTrade={upsertTrade} onDeleteTrade={deleteTrade} dayMeta={journalDays} setDayMeta={setJournalDays} onSave={()=>user ? saveJournalDays(user.uid, normalizeJournalDays(journalDays)) : Promise.resolve()}/>}
         </div>
       </div>
 
