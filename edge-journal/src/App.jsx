@@ -1492,6 +1492,33 @@ const RC_DEFAULT_SEGMENTS = [
   { id:"2–4",   grade:"", playbookOnly:false, sizing:false, immedFavor:false, comments:"" },
 ];
 
+const ImageLightbox = ({ src, onClose }) => {
+  useEffect(() => {
+    const handler = e => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{ position:"fixed", inset:0, zIndex:9999, background:"rgba(0,0,0,0.88)", display:"flex", alignItems:"center", justifyContent:"center", cursor:"zoom-out", backdropFilter:"blur(4px)" }}
+    >
+      <img
+        src={src}
+        onClick={e=>e.stopPropagation()}
+        alt="Preview"
+        style={{ maxWidth:"90vw", maxHeight:"90vh", objectFit:"contain", borderRadius:10, border:"1px solid var(--border2)", boxShadow:"0 24px 64px rgba(0,0,0,0.8)", cursor:"default" }}
+      />
+      <button
+        onClick={onClose}
+        style={{ position:"fixed", top:20, right:24, background:"transparent", border:"none", color:"var(--muted)", fontSize:28, cursor:"pointer", lineHeight:1 }}
+        aria-label="Close preview"
+      >✕</button>
+    </div>
+  );
+};
+
 const RCSection = ({ label, children }) => (
   <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"16px 20px" }}>
     <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:14 }}>
@@ -1508,6 +1535,7 @@ function JournalPage({ trades, onSelectTrade, onNavigateToTrade, onUpsertTrade, 
   const [editingTrade, setEditingTrade]   = useState(null);
   const [collapsed, setCollapsed]         = useState(false);
   const [draftHtml, setDraftHtml]         = useState("");
+  const [previewImg, setPreviewImg]       = useState(null);
   const lastLoadedDayRef = useRef("");
   const notesRef         = useRef(null);
   const fileRef          = useRef(null);
@@ -1695,6 +1723,8 @@ function JournalPage({ trades, onSelectTrade, onNavigateToTrade, onUpsertTrade, 
   );
 
   return (
+    <>
+    {previewImg && <ImageLightbox src={previewImg} onClose={()=>setPreviewImg(null)} />}
     <div style={{ display:"grid", gridTemplateColumns:collapsed?"48px 1fr":"240px 1fr", height:"calc(100vh - 146px)", border:"1px solid var(--border)", borderRadius:10, overflow:"hidden" }}>
 
       {/* ── LEFT SIDEBAR ── */}
@@ -1776,7 +1806,7 @@ function JournalPage({ trades, onSelectTrade, onNavigateToTrade, onUpsertTrade, 
                   </button>
                 ) : (
                   <div>
-                    <img src={selectedMeta.image} alt="Journal" style={{ maxWidth:420, borderRadius:8, border:"1px solid var(--border)" }} />
+                    <img src={selectedMeta.image} alt="Journal" onClick={()=>setPreviewImg(selectedMeta.image)} style={{ maxWidth:420, borderRadius:8, border:"1px solid var(--border)", cursor:"zoom-in", display:"block" }} />
                     <div style={{ marginTop:8, display:"flex", gap:8 }}>
                       <Btn onClick={()=>fileRef.current?.click()}>Replace</Btn>
                       <Btn onClick={()=>updateMeta(selectedDate, d=>({...d,image:""}))} variant="ghost">Remove</Btn>
@@ -1935,7 +1965,7 @@ function JournalPage({ trades, onSelectTrade, onNavigateToTrade, onUpsertTrade, 
                       </button>
                     ) : (
                       <div>
-                        <img src={rc.easiestImage} alt="Easiest trade chart" style={{ width:"100%", maxHeight:200, objectFit:"contain", borderRadius:8, border:"1px solid var(--border)" }} />
+                        <img src={rc.easiestImage} alt="Easiest trade chart" onClick={()=>setPreviewImg(rc.easiestImage)} style={{ width:"100%", maxHeight:200, objectFit:"contain", borderRadius:8, border:"1px solid var(--border)", cursor:"zoom-in", display:"block" }} />
                         <div style={{ marginTop:6, display:"flex", gap:6 }}>
                           <Btn onClick={()=>easiestImgRef.current?.click()} style={{ fontSize:10, padding:"4px 8px" }}>Replace</Btn>
                           <Btn onClick={()=>updateRC({easiestImage:""})} variant="ghost" style={{ fontSize:10, padding:"4px 8px" }}>Remove</Btn>
@@ -1976,6 +2006,7 @@ function JournalPage({ trades, onSelectTrade, onNavigateToTrade, onUpsertTrade, 
         </div>
       </div>
     </div>
+    </>
   );
 }
 

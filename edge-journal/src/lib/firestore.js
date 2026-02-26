@@ -39,6 +39,7 @@ export function saveJournalDays(uid, days) {
         notesHtml:   day.notesHtml   ?? "",
         image:       day.image       ?? "",
         chartImages: day.chartImages ?? [],
+        reportCard:  day.reportCard  ?? null,
       })
     )
   );
