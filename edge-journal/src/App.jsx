@@ -319,8 +319,9 @@ function parseCSV(text) {
       trades.push(trade);
     }
 
-    return trades.length
-      ? { trades, skipped }
+    const grouped = groupFills(trades);
+    return grouped.length
+      ? { trades: grouped, skipped }
       : { trades: [], skipped, error: "Could not recognize Tradovate CSV columns." };
   }
 
@@ -409,6 +410,57 @@ function parseCSV(text) {
   }
 
   return { trades, skipped: 0 };
+}
+
+// ─── GROUP FILLS ──────────────────────────────────────────────────────────────
+// Collapses raw per-contract fills that share (date + symbol + side + entryTime)
+// into one grouped trade. Summed QTY, summed P&L, latest exitTime, shared entry.
+// Exit price is the last fill's price; scaledExit:true when fills have different exits.
+// Original fills are preserved in trade.fills[] for the audit-expand UI.
+function groupFills(rawTrades) {
+  const groups = new Map();
+  for (const t of rawTrades) {
+    const key = `${t.date}::${t.symbol}::${t.side}::${t.entryTime}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(t);
+  }
+
+  const result = [];
+  for (const fills of groups.values()) {
+    if (fills.length === 1) {
+      result.push({ ...fills[0], fills: [] });
+      continue;
+    }
+
+    const first          = fills[0];
+    const totalContracts = fills.reduce((a, t) => a + t.contracts, 0);
+    const totalPnl       = Number(fills.reduce((a, t) => a + t.pnl, 0).toFixed(2));
+    const totalTicks     = fills.reduce((a, t) => a + (t.ticks || 0), 0);
+    const latestExitTime = fills.map(t => t.exitTime || "").sort().at(-1) || first.exitTime;
+    const uniqueExits    = [...new Set(fills.map(t => t.exitPrice))];
+    const exitPrice      = fills.at(-1).exitPrice;
+    const scaledExit     = uniqueExits.length > 1;
+
+    const grouped = {
+      ...first,
+      contracts: totalContracts,
+      pnl:       totalPnl,
+      ticks:     totalTicks,
+      exitTime:  latestExitTime,
+      exitPrice,
+      scaledExit,
+      win:       totalPnl > 0,
+      fills:     fills.map(({ fills: _nested, ...f }) => f),
+    };
+    // Stable ID from grouped properties
+    grouped.id = [
+      grouped.date, grouped.symbol, grouped.entryTime, grouped.exitTime,
+      grouped.side, Number(grouped.entryPrice).toFixed(6),
+      Number(grouped.exitPrice).toFixed(6), grouped.contracts,
+    ].join("_").replace(/\s+/g, "");
+    result.push(grouped);
+  }
+  return result;
 }
 
 // ─── SHARED UI ────────────────────────────────────────────────────────────────
@@ -1067,7 +1119,14 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport, onDeleteAll })
   const [fReviewed,      setFReviewed]      = useState("all");
   const [modal,          setModal]          = useState(false);
   const [confirmDelete,  setConfirmDelete]  = useState(false);
-  const [sortBy,         setSortBy]         = useState(null);   // 'date' | 'symbol' | 'pnl'
+  const [sortBy,         setSortBy]         = useState(null);
+  const [expandedFills,  setExpandedFills]  = useState(new Set());
+
+  const toggleFills = id => setExpandedFills(prev => {
+    const s = new Set(prev);
+    s.has(id) ? s.delete(id) : s.add(id);
+    return s;
+  });
   const [sortDir,        setSortDir]        = useState("desc");
 
   const symbols = [...new Set(trades.map(t=>t.symbol))];
@@ -1109,9 +1168,10 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport, onDeleteAll })
     );
   };
 
-  const gridCols = hasAnyR
+  const hasGroupedFills = filtered.some(t => t.fills?.length > 0);
+  const gridCols = (hasGroupedFills ? "20px " : "") + (hasAnyR
     ? "80px 90px 64px 50px 90px 90px 86px 86px 112px 56px 72px 60px 54px"
-    : "80px 90px 64px 50px 90px 90px 86px 86px 112px 72px 60px 54px";
+    : "80px 90px 64px 50px 90px 90px 86px 86px 112px 72px 60px 54px");
 
   // Show empty state if no trades yet
   if (trades.length === 0) {
@@ -1192,6 +1252,7 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport, onDeleteAll })
       {/* Table */}
       <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, overflow:"hidden" }}>
         <div style={{ display:"grid", gridTemplateColumns:gridCols, padding:"10px 16px", borderBottom:"1px solid var(--border)", gap:0 }}>
+          {hasGroupedFills && <div/>}
           <SortHd label="DATE"   col="date"   />
           <SortHd label="SYMBOL" col="symbol" />
           {["SIDE","QTY","ENTRY TIME","EXIT TIME","ENTRY $","EXIT $"].map(h=>(
@@ -1209,36 +1270,73 @@ function TradeLog({ trades, notes, playbooks, onSelect, onImport, onDeleteAll })
         )}
 
         {filtered.map(t=>{
-          const n      = notes[t.id]||{};
-          const filled = Object.values(n).filter(v=>v&&v!==null&&v!==""&&(!Array.isArray(v)||v.length>0)).length;
-          const rev    = isReviewed(n);
-          const rVal   = calcR(t.pnl, n.risk1R);
+          const n        = notes[t.id]||{};
+          const filled   = Object.values(n).filter(v=>v&&v!==null&&v!==""&&(!Array.isArray(v)||v.length>0)).length;
+          const rev      = isReviewed(n);
+          const rVal     = calcR(t.pnl, n.risk1R);
           const mistakes = n.mistakes||[];
+          const hasFills = t.fills?.length > 0;
+          const isOpen   = expandedFills.has(t.id);
           return (
-            <div key={t.id} className="hover-row" onClick={()=>onSelect(t)} style={{ display:"grid", gridTemplateColumns:gridCols, padding:"11px 16px", borderBottom:"1px solid var(--border)", gap:0, alignItems:"center", cursor:"pointer", background:!t.win?"#ff4d6a05":"transparent", transition:"background 0.1s" }}>
-              <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)" }}>{t.date.slice(5)}</span>
-              <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:600 }}>{t.symbol}</span>
-              <Chip color={sideColor(t.side)}>{t.side==="LONG"?"▲L":"▼S"}</Chip>
-              <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)" }}>{t.contracts}</span>
-              <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)" }}>{t.entryTime}</span>
-              <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)" }}>{t.exitTime}</span>
-              <span style={{ fontFamily:"var(--font-mono)", fontSize:11 }}>{t.entryPrice}</span>
-              <span style={{ fontFamily:"var(--font-mono)", fontSize:11 }}>{t.exitPrice}</span>
-              <span style={{ fontFamily:"var(--font-mono)", fontSize:13, fontWeight:700, color:t.pnl>=0?"var(--green)":"var(--red)" }}>{fmt(t.pnl,1)}</span>
-              {hasAnyR && <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:700, color:rColor(rVal) }}>{fmtR(rVal)}</span>}
-              <span style={{ display:"inline-flex" }}>
-                <span style={{ fontFamily:"var(--font-mono)", fontSize:10, fontWeight:600, color:rev?"var(--green)":"var(--gold)", background:rev?"var(--green)15":"var(--gold)15", border:`1px solid ${rev?"var(--green)35":"var(--gold)35"}`, borderRadius:10, padding:"2px 8px" }}>
-                  {rev ? "done" : "open"}
+            <div key={t.id}>
+              {/* ── Main trade row ── */}
+              <div className="hover-row" onClick={()=>onSelect(t)} style={{ display:"grid", gridTemplateColumns:gridCols, padding:"11px 16px", borderBottom: hasFills && isOpen ? "none" : "1px solid var(--border)", gap:0, alignItems:"center", cursor:"pointer", background:!t.win?"#ff4d6a05":"transparent", transition:"background 0.1s" }}>
+                {hasGroupedFills && (
+                  <span style={{ display:"flex", alignItems:"center" }}>
+                    {hasFills && (
+                      <button type="button" onClick={e=>{e.stopPropagation(); toggleFills(t.id);}}
+                        style={{ background:"transparent", border:"none", color:"var(--muted)", cursor:"pointer", fontSize:11, lineHeight:1, padding:"1px 3px", borderRadius:3 }}>
+                        {isOpen ? "▾" : "▸"}
+                      </button>
+                    )}
+                  </span>
+                )}
+                <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)" }}>{t.date.slice(5)}</span>
+                <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:600 }}>{t.symbol}</span>
+                <Chip color={sideColor(t.side)}>{t.side==="LONG"?"▲L":"▼S"}</Chip>
+                <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)" }}>{t.contracts}</span>
+                <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)" }}>{t.entryTime}</span>
+                <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--muted)" }}>{t.exitTime}</span>
+                <span style={{ fontFamily:"var(--font-mono)", fontSize:11 }}>{t.entryPrice}</span>
+                <span style={{ fontFamily:"var(--font-mono)", fontSize:11 }}>
+                  {t.scaledExit
+                    ? <span style={{ fontSize:9, fontWeight:700, color:"var(--blue)", background:"var(--blue)15", border:"1px solid var(--blue)35", borderRadius:4, padding:"2px 6px" }}>SCALED</span>
+                    : t.exitPrice}
                 </span>
-              </span>
-              <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:filled>0?"var(--blue)":"var(--dim)", fontWeight:filled>0?700:500 }}>
-                {mistakes.length>0&&<span style={{ color:"var(--red)", marginRight:2 }}>⚠</span>}
-                {filled>0?`●${filled}`:"○"}
-              </span>
-              {n.grade
-                ? <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:700, color:gradeColor(n.grade), background:gradeColor(n.grade)+"22", padding:"2px 7px", borderRadius:4, display:"inline-block" }}>{n.grade}</span>
-                : <span style={{ color:"var(--dim)", fontSize:11 }}>—</span>
-              }
+                <span style={{ fontFamily:"var(--font-mono)", fontSize:13, fontWeight:700, color:t.pnl>=0?"var(--green)":"var(--red)" }}>{fmt(t.pnl,1)}</span>
+                {hasAnyR && <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:700, color:rColor(rVal) }}>{fmtR(rVal)}</span>}
+                <span style={{ display:"inline-flex" }}>
+                  <span style={{ fontFamily:"var(--font-mono)", fontSize:10, fontWeight:600, color:rev?"var(--green)":"var(--gold)", background:rev?"var(--green)15":"var(--gold)15", border:`1px solid ${rev?"var(--green)35":"var(--gold)35"}`, borderRadius:10, padding:"2px 8px" }}>
+                    {rev ? "done" : "open"}
+                  </span>
+                </span>
+                <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:filled>0?"var(--blue)":"var(--dim)", fontWeight:filled>0?700:500 }}>
+                  {mistakes.length>0&&<span style={{ color:"var(--red)", marginRight:2 }}>⚠</span>}
+                  {filled>0?`●${filled}`:"○"}
+                </span>
+                {n.grade
+                  ? <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:700, color:gradeColor(n.grade), background:gradeColor(n.grade)+"22", padding:"2px 7px", borderRadius:4, display:"inline-block" }}>{n.grade}</span>
+                  : <span style={{ color:"var(--dim)", fontSize:11 }}>—</span>
+                }
+              </div>
+
+              {/* ── Raw fill sub-rows (expandable) ── */}
+              {hasFills && isOpen && t.fills.map((fill, fi) => (
+                <div key={fi} style={{ display:"grid", gridTemplateColumns:gridCols, padding:"7px 16px", borderBottom: fi===t.fills.length-1?"1px solid var(--border)":"1px solid var(--border)22", gap:0, alignItems:"center", background:"var(--surface2)", cursor:"default" }}>
+                  {hasGroupedFills && <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--dim)", paddingLeft:6 }}>{fi===t.fills.length-1?"└":"├"}</span>}
+                  <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--dim)" }}>fill {fi+1}</span>
+                  <span/>
+                  <Chip color={sideColor(fill.side)}>{fill.side==="LONG"?"▲L":"▼S"}</Chip>
+                  <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)" }}>{fill.contracts}</span>
+                  <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)" }}>{fill.entryTime}</span>
+                  <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)" }}>{fill.exitTime}</span>
+                  <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)" }}>{fill.entryPrice}</span>
+                  <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)" }}>{fill.exitPrice}</span>
+                  <span style={{ fontFamily:"var(--font-mono)", fontSize:11, fontWeight:600, color:fill.pnl>=0?"var(--green)":"var(--red)" }}>{fmt(fill.pnl,1)}</span>
+                  {hasAnyR && <span/>}
+                  <span/><span/><span/>
+                </div>
+              ))}
             </div>
           );
         })}
@@ -1529,12 +1627,13 @@ const RCSection = ({ label, children }) => (
   </div>
 );
 
-function JournalPage({ trades, onSelectTrade, onNavigateToTrade, onUpsertTrade, onDeleteTrade, dayMeta, setDayMeta }) {
+function JournalPage({ trades, onSelectTrade, onNavigateToTrade, onUpsertTrade, onDeleteTrade, dayMeta, setDayMeta, onSave }) {
   const [selectedDayId, setSelectedDayId] = useState("");
-  const [tab, setTab]                     = useState("notes"); // "notes" | "report"
+  const [tab, setTab]                     = useState("notes");
   const [editingTrade, setEditingTrade]   = useState(null);
   const [collapsed, setCollapsed]         = useState(false);
   const [draftHtml, setDraftHtml]         = useState("");
+  const [saveStatus, setSaveStatus]       = useState("idle"); // "idle" | "saving" | "saved" | "error"
   const [previewImg, setPreviewImg]       = useState(null);
   const lastLoadedDayRef = useRef("");
   const notesRef         = useRef(null);
@@ -1768,6 +1867,11 @@ function JournalPage({ trades, onSelectTrade, onNavigateToTrade, onUpsertTrade, 
             <button key={t} onClick={()=>setTab(t)} style={{ padding:"8px 14px", border:"none", borderRadius:6, background:tab===t?"var(--green-dim)":"transparent", color:tab===t?"var(--green)":"var(--muted)", fontFamily:"var(--font-mono)", fontSize:12, fontWeight:tab===t?700:400, cursor:"pointer", transition:"all 0.15s" }}>{l}</button>
           ))}
           <div style={{ flex:1 }}/>
+          {/* Auto-save indicator */}
+          <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", display:"flex", alignItems:"center", gap:5 }}>
+            <span style={{ width:6, height:6, borderRadius:"50%", background:"var(--green)", display:"inline-block", opacity:0.7 }}/>
+            Auto-saving to Firestore
+          </div>
           {/* Formatting buttons — Notes tab only */}
           {tab==="notes" && [["B","bold","Bold"],["I","italic","Italic"],["U","underline","Underline"],["•","insertUnorderedList","Bulleted list"],["1.","insertOrderedList","Numbered list"]].map(([label,cmd,aria],i)=>(
             <button key={i} onClick={()=>applyFormat(cmd)} title={aria} aria-label={aria} style={{ background:"var(--surface2)", border:"1px solid var(--border2)", color:"var(--text)", fontFamily:"var(--font-mono)", fontSize:11, fontWeight:700, padding:"5px 9px", borderRadius:5, minWidth:28, cursor:"pointer" }}>{label}</button>
@@ -1993,11 +2097,22 @@ function JournalPage({ trades, onSelectTrade, onNavigateToTrade, onUpsertTrade, 
                 </div>
               </RCSection>
 
-              {/* Save button (data auto-saves; this provides a tactile confirmation) */}
+              {/* Save button — explicitly flushes to Firestore */}
               <button
-                onClick={()=>{/* no-op: all fields save on change */}}
-                style={{ width:"100%", padding:"14px", background:"var(--green)", border:"none", borderRadius:8, color:"#000", fontFamily:"var(--font-mono)", fontSize:12, fontWeight:700, letterSpacing:"0.12em", textTransform:"uppercase", cursor:"pointer", marginBottom:8 }}>
-                Save Report Card
+                disabled={saveStatus==="saving"}
+                onClick={async ()=>{
+                  setSaveStatus("saving");
+                  try {
+                    await onSave();
+                    setSaveStatus("saved");
+                    setTimeout(()=>setSaveStatus("idle"), 2500);
+                  } catch {
+                    setSaveStatus("error");
+                    setTimeout(()=>setSaveStatus("idle"), 3000);
+                  }
+                }}
+                style={{ width:"100%", padding:"14px", background:saveStatus==="saved"?"#00b37a":saveStatus==="error"?"var(--red)":"var(--green)", border:"none", borderRadius:8, color:"#000", fontFamily:"var(--font-mono)", fontSize:12, fontWeight:700, letterSpacing:"0.12em", textTransform:"uppercase", cursor:saveStatus==="saving"?"wait":"pointer", marginBottom:8, transition:"background 0.2s" }}>
+                {saveStatus==="saving" ? "Saving…" : saveStatus==="saved" ? "✓ Saved to Database" : saveStatus==="error" ? "✕ Save Failed" : "Save Report Card"}
               </button>
 
             </div>
@@ -2228,7 +2343,7 @@ export default function App() {
           {page==="dashboard" && <Dashboard trades={trades} notes={notes} dayMeta={journalDays} setDayMeta={setJournalDays} onSelectTrade={setSelTrade}/>} 
           {page==="trades"    && (viewMode==="TRADE_DETAIL" ? <TradeDetailPage trades={trades} selectedDayId={selectedDayId} selectedTradeId={selectedTradeId} onBack={()=>setViewMode("DAY")} dayMeta={journalDays} setDayMeta={setJournalDays} notes={notes} onUpdate={updateNote} onClearTradeNotes={(tradeId)=>setNotes(prev=>{ const next={...prev}; delete next[tradeId]; return next; })} playbooks={playbooks} /> : <TradeLog trades={trades} notes={notes} playbooks={playbooks} onSelect={openTradeDetail} onImport={importTrades} onDeleteAll={deleteAllTrades}/>)}
           {page==="playbook"  && <Playbook   trades={trades} notes={notes} playbooks={playbooks} setPlaybooks={setPlaybooks}/>}
-          {page==="journal"   && <JournalPage trades={trades} onSelectTrade={setSelTrade} onNavigateToTrade={navigateToTrade} onUpsertTrade={upsertTrade} onDeleteTrade={deleteTrade} dayMeta={journalDays} setDayMeta={setJournalDays}/>}
+          {page==="journal"   && <JournalPage trades={trades} onSelectTrade={setSelTrade} onNavigateToTrade={navigateToTrade} onUpsertTrade={upsertTrade} onDeleteTrade={deleteTrade} dayMeta={journalDays} setDayMeta={setJournalDays} onSave={()=>user ? saveJournalDays(user.uid, normalizeJournalDays(journalDays)) : Promise.resolve()}/>}
         </div>
       </div>
 
