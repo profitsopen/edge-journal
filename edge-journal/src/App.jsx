@@ -410,7 +410,8 @@ function parseCSV(text) {
     openByKey.set(key, open);
   }
 
-  return { trades, skipped: 0 };
+  const grouped = groupFills(trades);
+  return { trades: grouped, skipped: 0 };
 }
 
 // ─── GROUP FILLS ──────────────────────────────────────────────────────────────
@@ -438,20 +439,23 @@ function groupFills(rawTrades) {
     const totalPnl       = Number(fills.reduce((a, t) => a + t.pnl, 0).toFixed(2));
     const totalTicks     = fills.reduce((a, t) => a + (t.ticks || 0), 0);
     const latestExitTime = fills.map(t => t.exitTime || "").sort().at(-1) || first.exitTime;
+    // Weighted average prices across fills (e.g. 2 fills at 24974.5 and 24974.25 → avg entry)
+    const entryPrice     = Number((fills.reduce((a, t) => a + t.entryPrice * t.contracts, 0) / totalContracts).toFixed(6));
+    const exitPrice      = Number((fills.reduce((a, t) => a + t.exitPrice  * t.contracts, 0) / totalContracts).toFixed(6));
     const uniqueExits    = [...new Set(fills.map(t => t.exitPrice))];
-    const exitPrice      = fills.at(-1).exitPrice;
     const scaledExit     = uniqueExits.length > 1;
 
     const grouped = {
       ...first,
-      contracts: totalContracts,
-      pnl:       totalPnl,
-      ticks:     totalTicks,
-      exitTime:  latestExitTime,
+      contracts:  totalContracts,
+      pnl:        totalPnl,
+      ticks:      totalTicks,
+      exitTime:   latestExitTime,
+      entryPrice,
       exitPrice,
       scaledExit,
-      win:       totalPnl > 0,
-      fills:     fills.map(({ fills: _nested, ...f }) => f),
+      win:        totalPnl > 0,
+      fills:      fills.map(({ fills: _nested, ...f }) => f),
     };
     // Stable ID from grouped properties
     grouped.id = [
