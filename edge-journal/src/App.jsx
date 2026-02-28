@@ -266,8 +266,8 @@ function parseCSV(text) {
 
   const normalizedHeaders = headers.map((h) => h.toLowerCase().replace(/[^a-z0-9]/g, ""));
   const isTradovate = normalizedHeaders.includes("symbol")
-    && (normalizedHeaders.includes("side") || normalizedHeaders.includes("buysell") || normalizedHeaders.includes("action"))
-    && (normalizedHeaders.includes("avgeentryprice") || normalizedHeaders.includes("avgentryprice") || normalizedHeaders.includes("entryprice"))
+    && (normalizedHeaders.includes("side") || normalizedHeaders.includes("buysell") || normalizedHeaders.includes("action") || normalizedHeaders.includes("bs"))
+    && (normalizedHeaders.includes("avgentryprice") || normalizedHeaders.includes("entryprice"))
     && (normalizedHeaders.includes("avgexitprice") || normalizedHeaders.includes("exitprice"))
     && (normalizedHeaders.includes("profitloss") || normalizedHeaders.includes("pnl") || normalizedHeaders.includes("pl") || normalizedHeaders.includes("realizedpandl"));
 
@@ -282,13 +282,13 @@ function parseCSV(text) {
       const sideRaw = get(r, ["Side", "BuySell", "B/S", "Action", "side", "buySell"]).toUpperCase();
       const side = (sideRaw.includes("SELL") || sideRaw.includes("SHORT")) ? "SHORT" : "LONG";
       const contracts = Math.max(1, Math.round(toNum(get(r, ["Qty", "Quantity", "Contracts", "qty"]), 1)));
-      const entryPrice = toNum(get(r, ["AvgEntryPrice", "AverageEntryPrice", "EntryPrice", "Entry Price"]), NaN);
-      const exitPrice = toNum(get(r, ["AvgExitPrice", "AverageExitPrice", "ExitPrice", "Exit Price"]), NaN);
+      const entryPrice = toNum(get(r, ["Avg Entry Price", "AvgEntryPrice", "AverageEntryPrice", "EntryPrice", "Entry Price"]), NaN);
+      const exitPrice = toNum(get(r, ["Avg Exit Price", "AvgExitPrice", "AverageExitPrice", "ExitPrice", "Exit Price"]), NaN);
       const csvPnl = toNum(get(r, ["ProfitLoss", "PnL", "P&L", "NetProfit", "RealizedPnL"]), NaN);
       const csvCommission = toNum(get(r, ["Commission", "Commissions", "Fees", "Fee", "TotalFees", "Total Fees", "TotalCommission", "Total Commission"]), 0);
-      const date = toIsoDate(get(r, ["Date", "TradeDate", "EntryTime", "ExitTime", "Opened", "Closed"]));
-      const entryTime = toClock(get(r, ["EntryTime", "Opened", "Open Time", "StartTime"]));
-      const exitTime = toClock(get(r, ["ExitTime", "Closed", "Close Time", "EndTime"])) || entryTime;
+      const date = toIsoDate(get(r, ["Date", "TradeDate", "Entry Time", "EntryTime", "Exit Time", "ExitTime", "Opened", "Closed"]));
+      const entryTime = toClock(get(r, ["Entry Time", "EntryTime", "Opened", "Open Time", "StartTime"]));
+      const exitTime = toClock(get(r, ["Exit Time", "ExitTime", "Closed", "Close Time", "EndTime"])) || entryTime;
 
       if (!date || !Number.isFinite(entryPrice) || !Number.isFinite(exitPrice)) {
         skipped += 1;
@@ -342,7 +342,8 @@ function parseCSV(text) {
       trade.id = makeTradeId(trade);
       return trade;
     });
-    return { trades, skipped: 0 };
+    const grouped = groupFills(trades);
+    return { trades: grouped, skipped: 0 };
   }
 
   const fills = rows.map((r, i) => {
