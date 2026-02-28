@@ -414,8 +414,9 @@ function parseCSV(text) {
 
 // ─── GROUP FILLS ──────────────────────────────────────────────────────────────
 // Collapses raw per-contract fills that share (date + symbol + side + entryTime)
-// into one grouped trade. Summed QTY, summed P&L, latest exitTime, shared entry.
-// Exit price is the last fill's price; scaledExit:true when fills have different exits.
+// into one grouped trade. Summed QTY, summed P&L, latest exitTime.
+// Entry price = weighted average across fills.
+// Exit price = last fill's price; scaledExit:true when fills have different exits.
 // Original fills are preserved in trade.fills[] for the audit-expand UI.
 function groupFills(rawTrades) {
   const groups = new Map();
@@ -440,13 +441,18 @@ function groupFills(rawTrades) {
     const uniqueExits    = [...new Set(fills.map(t => t.exitPrice))];
     const exitPrice      = fills.at(-1).exitPrice;
     const scaledExit     = uniqueExits.length > 1;
+    // Weighted average entry price across fills (handles scaled-in entries)
+    const avgEntryPrice  = Number(
+      (fills.reduce((a, t) => a + t.entryPrice * t.contracts, 0) / totalContracts).toFixed(2)
+    );
 
     const grouped = {
       ...first,
-      contracts: totalContracts,
-      pnl:       totalPnl,
-      ticks:     totalTicks,
-      exitTime:  latestExitTime,
+      contracts:  totalContracts,
+      pnl:        totalPnl,
+      ticks:      totalTicks,
+      exitTime:   latestExitTime,
+      entryPrice: avgEntryPrice,
       exitPrice,
       scaledExit,
       win:       totalPnl > 0,
