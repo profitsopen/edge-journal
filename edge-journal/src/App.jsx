@@ -801,7 +801,13 @@ function Dashboard({ trades, notes, dayMeta, setDayMeta, onSelectTrade }) {
     const bySymbol = {};
     trades.forEach(t=>{ if(!bySymbol[t.symbol]) bySymbol[t.symbol]={pnl:0,count:0,wins:0}; bySymbol[t.symbol].pnl+=t.pnl; bySymbol[t.symbol].count++; if(t.win) bySymbol[t.symbol].wins++; });
 
-    return { total, winRate:wins.length/trades.length, avgW, avgL, pf, wCount:wins.length, lCount:losses.length, tCount:trades.length, curve, bySymbol, avgR, totalR, rCount:rVals.length, reviewed:reviewed.length, unreviewed, topMistakes };
+    const DOW_LABELS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+    const byDow = DOW_LABELS.map(label=>({ label, pnl:0, count:0, wins:0 }));
+    trades.forEach(t=>{ const dow = new Date(t.date+"T12:00:00").getDay(); byDow[dow].pnl+=t.pnl; byDow[dow].count++; if(t.win) byDow[dow].wins++; });
+    const activeDow = byDow.filter(d=>d.count>0);
+    const maxDowPnl = Math.max(...activeDow.map(d=>Math.abs(d.pnl)), 1);
+
+    return { total, winRate:wins.length/trades.length, avgW, avgL, pf, wCount:wins.length, lCount:losses.length, tCount:trades.length, curve, bySymbol, avgR, totalR, rCount:rVals.length, reviewed:reviewed.length, unreviewed, topMistakes, activeDow, maxDowPnl };
   },[trades,notes]);
 
   if (!s) return (
@@ -874,6 +880,7 @@ function Dashboard({ trades, notes, dayMeta, setDayMeta, onSelectTrade }) {
       </div>
 
       <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr", gap:12, marginBottom:12 }}>
+        {/* ── LEFT COLUMN: charts + day-of-week ── */}
         <div style={{ display:"grid", gap:12 }}>
           <div className="fade-up-2" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"20px 20px 12px" }}>
             <SectionTitle title="Equity Curve" />
@@ -896,16 +903,10 @@ function Dashboard({ trades, notes, dayMeta, setDayMeta, onSelectTrade }) {
               );
             })()}
           </div>
-          <div className="fade-up-3" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:20 }}>
-            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:16 }}><span aria-hidden="true" style={{ fontSize:12, lineHeight:1 }}>📅</span><div style={{ fontFamily:"var(--font-display)", fontSize:12, fontWeight:700, color:"var(--muted)", letterSpacing:"0.12em", textTransform:"uppercase" }}>Calendar</div></div>
-            <DashboardCalendar trades={trades} notes={notes} dayMeta={dayMeta} setDayMeta={setDayMeta} onSelectTrade={onSelectTrade} />
-          </div>
-        </div>
 
-        <div style={{ display:"grid", gap:12, alignContent:"start" }}>
           <div className="fade-up-2" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"20px 20px 12px" }}>
             <SectionTitle title="Daily P&L" />
-            <ResponsiveContainer width="100%" height={180}>
+            <ResponsiveContainer width="100%" height={150}>
               <BarChart data={s.curve} margin={{top:4,right:4,bottom:0,left:-20}}>
                 <XAxis dataKey="date" tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
                 <YAxis tick={{fontFamily:"var(--font-mono)",fontSize:10,fill:"var(--muted)"}} axisLine={false} tickLine={false}/>
@@ -914,6 +915,34 @@ function Dashboard({ trades, notes, dayMeta, setDayMeta, onSelectTrade }) {
                 <Bar dataKey="day" radius={[4,4,0,0]}>{s.curve.map((d,i)=><Cell key={i} fill={d.day>=0?"#00e5a0":"#ff4d6a"}/>)}</Bar>
               </BarChart>
             </ResponsiveContainer>
+          </div>
+
+          {/* Day of Week Performance */}
+          <div className="fade-up-3" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:20 }}>
+            <SectionTitle title="Day of Week" />
+            {s.activeDow.length === 0
+              ? <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--dim)", paddingTop:8 }}>No data yet</div>
+              : s.activeDow.map(d=>(
+                <div key={d.label} style={{ marginBottom:12 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
+                    <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:600 }}>{d.label}</span>
+                    <span style={{ fontFamily:"var(--font-mono)", fontSize:12, color:d.pnl>=0?"var(--green)":"var(--red)", fontWeight:600 }}>{fmt(d.pnl,0)}</span>
+                  </div>
+                  <div style={{ height:3, background:"var(--border)", borderRadius:2 }}>
+                    <div style={{ height:"100%", width:`${Math.abs(d.pnl)/s.maxDowPnl*100}%`, background:d.pnl>=0?"var(--green)":"var(--red)", borderRadius:2 }}/>
+                  </div>
+                  <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--muted)", marginTop:3 }}>{d.count} trades · {Math.round(d.wins/d.count*100)}% WR</div>
+                </div>
+              ))
+            }
+          </div>
+        </div>
+
+        {/* ── RIGHT COLUMN: calendar + by symbol + top mistakes ── */}
+        <div style={{ display:"grid", gap:12, alignContent:"start" }}>
+          <div className="fade-up-3" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:20 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:16 }}><span aria-hidden="true" style={{ fontSize:12, lineHeight:1 }}>📅</span><div style={{ fontFamily:"var(--font-display)", fontSize:12, fontWeight:700, color:"var(--muted)", letterSpacing:"0.12em", textTransform:"uppercase" }}>Calendar</div></div>
+            <DashboardCalendar trades={trades} notes={notes} dayMeta={dayMeta} setDayMeta={setDayMeta} onSelectTrade={onSelectTrade} />
           </div>
 
           <div className="fade-up-3" style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:20 }}>
@@ -1372,13 +1401,15 @@ function DashboardCalendar({ trades, notes, dayMeta, setDayMeta, onSelectTrade }
   const byDate = useMemo(() => {
     const m = {};
     trades.forEach(t => {
-      if(!m[t.date]) m[t.date] = { pnl:0, trades:[], wins:0 };
+      if(!m[t.date]) m[t.date] = { pnl:0, trades:[], wins:0, rTotal:0, rCount:0 };
       m[t.date].pnl += t.pnl;
       m[t.date].trades.push(t);
       if (t.win) m[t.date].wins++;
+      const r = calcR(t.pnl, notes[t.id]?.risk1R);
+      if (r != null) { m[t.date].rTotal += r; m[t.date].rCount++; }
     });
     return m;
-  }, [trades]);
+  }, [trades, notes]);
 
   const updateMeta = (date, updater) => {
     if (!date) return;
@@ -1420,9 +1451,17 @@ function DashboardCalendar({ trades, notes, dayMeta, setDayMeta, onSelectTrade }
             const sel = selDay===day;
             const intensity = d ? Math.min(Math.abs(d.pnl)/maxAbs,1) : 0;
             return (
-              <div key={day} onClick={()=>d&&setSelDay(day===selDay?null:day)} style={{ aspectRatio:"1", borderRadius:8, padding:6, border:`1px solid ${sel?"var(--blue)":d?"var(--border2)":"var(--border)"}`, background:d?(d.pnl>=0?`rgba(0,229,160,${intensity*0.25})`:`rgba(255,77,106,${intensity*0.25})`):"var(--surface)", cursor:d?"pointer":"default", display:"flex", flexDirection:"column", justifyContent:"space-between" }}>
-                <div style={{ fontFamily:"var(--font-mono)", fontSize:10, color:d?"var(--text)":"var(--dim)" }}>{day}</div>
-                {d && <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:d.pnl>=0?"var(--green)":"var(--red)", fontWeight:700 }}>{d.pnl>=0?"+":""}{Math.round(d.pnl)}</div>}
+              <div key={day} onClick={()=>d&&setSelDay(day===selDay?null:day)} style={{ aspectRatio:"1", borderRadius:8, padding:5, border:`1px solid ${sel?"var(--blue)":d?"var(--border2)":"var(--border)"}`, background:d?(d.pnl>=0?`rgba(0,229,160,${intensity*0.25})`:`rgba(255,77,106,${intensity*0.25})`):"var(--surface)", cursor:d?"pointer":"default", display:"flex", flexDirection:"column", justifyContent:"space-between", overflow:"hidden" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                  <span style={{ fontFamily:"var(--font-mono)", fontSize:12, fontWeight:600, color:d?"var(--text)":"var(--dim)", lineHeight:1 }}>{day}</span>
+                  {d && <span style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--muted)", lineHeight:1 }}>{d.trades.length}T</span>}
+                </div>
+                {d && (
+                  <div>
+                    <div style={{ fontFamily:"var(--font-mono)", fontSize:11, color:d.pnl>=0?"var(--green)":"var(--red)", fontWeight:700, lineHeight:1 }}>{d.pnl>=0?"+":""}{Math.round(d.pnl)}</div>
+                    {d.rCount>0 && <div style={{ fontFamily:"var(--font-mono)", fontSize:9, color:rColor(d.rTotal/d.rCount), lineHeight:1.3 }}>{fmtR(d.rTotal/d.rCount)}</div>}
+                  </div>
+                )}
               </div>
             );
           })}
